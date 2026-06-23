@@ -75,7 +75,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v2.1</div>
+    <div id="version-tag">v2.2</div>
     <div id="map"></div>
 
     <script>
@@ -132,18 +132,15 @@
                 const north = bounds.getNorth();
                 const east = bounds.getEast();
 
-                const query = `[out:json][timeout:25];(node["amenity"="charging_station"](${south},${west},${north},${east});way["amenity"="charging_station"](${south},${west},${north},${east}););out center;`;
+                // FIXED: Embedded the identification comment natively to protect CORS status
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2\n(node["amenity"="charging_station"](${south},${west},${north},${east});way["amenity"="charging_station"](${south},${west},${north},${east}););out center;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
 
                 try {
-                    const response = await fetch(url.toString(), {
-                        method: "GET",
-                        headers: {
-                            "X-Requested-With": "OSM_EV_Charging_Map_App"
-                        }
-                    });
+                    // FIXED: Dropped the custom header to clear the preflight blockade entirely
+                    const response = await fetch(url.toString(), { method: "GET" });
                     const data = await response.json();
                     
                     if (isPopupActive) return;
@@ -163,7 +160,6 @@
 
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
-                                // Incremental stepped dot size calculation
                                 let dotRadius = 6; 
                                 if (capacity === 2) dotRadius = 7;
                                 else if (capacity >= 3 && capacity < 5) dotRadius = 8;
@@ -171,20 +167,18 @@
                                 else if (capacity >= 10 && capacity < 20) dotRadius = 11.5;
                                 else if (capacity >= 20) dotRadius = 14;
 
-                                // BRAND HIGHLIGHT ENGINE
-                                let dotColor = "#3b82f6"; // Standard blue fallback
-                                let borderColor = "#ffffff"; // Standard default border
+                                let dotColor = "#3b82f6"; 
+                                let borderColor = "#ffffff"; 
                                 const lowerOp = operator.toLowerCase();
 
                                 if (lowerOp.includes("tesla")) {
-                                    dotColor = "#e82127";  // Tesla Red
+                                    dotColor = "#e82127";  
                                 } else if (lowerOp.includes("fastned")) {
-                                    dotColor = "#ffc700";  // Fastned Yellow-Orange
+                                    dotColor = "#ffc700";  
                                 } else if (lowerOp.includes("shell")) {
-                                    dotColor = "#f7d117";  // Shell Yellow
-                                    borderColor = "#003aa6"; // Royal Blue shell trim accentuates viewability
+                                    dotColor = "#f7d117";  
+                                    borderColor = "#003aa6"; 
                                 } else if (kw) {
-                                    // Power level color fallback rules for independent operators
                                     const power = parseFloat(kw);
                                     if (power >= 100) dotColor = "#ef4444";     
                                     else if (power >= 22) dotColor = "#f97316"; 
@@ -203,7 +197,7 @@
                                     radius: dotRadius,
                                     fillColor: dotColor,
                                     color: borderColor,
-                                    weight: borderColor === "#ffffff" ? 1.5 : 2, // Slightly bolder border line for visibility
+                                    weight: borderColor === "#ffffff" ? 1.5 : 2, 
                                     opacity: 1,
                                     fillOpacity: 0.85
                                 }).bindPopup(popupContent);
@@ -213,7 +207,7 @@
                         });
                     }
                 } catch (error) {
-                    console.error("Fetch intercepted or server busy:", error);
+                    console.error("Fetch exception details:", error);
                 }
             }
 
