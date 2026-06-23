@@ -69,25 +69,23 @@
             border: 1px solid #e2e8f0;
         }
 
-        /* ABRP Style Premium Floating Badges */
+        /* FIXED: True ABRP Circle Badge Styling */
         .abrp-badge {
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 8px; /* Rounded pill style shape */
+            border-radius: 50%; /* Changed from 8px to 50% for a perfect premium circle look */
             border: 2px solid #ffffff;
             box-shadow: 0 3px 8px rgba(0,0,0,0.35);
-            background-color: #3b82f6; /* Fallback speed background color */
             transition: transform 0.1s ease;
         }
         
-        .abrp-badge img {
-            width: 75%;
-            height: 75%;
+        .abrp-badge svg, .abrp-badge img {
+            width: 70%;
+            height: 70%;
             object-fit: contain;
         }
 
-        /* Pure circle fallbacks for unbranded stations */
         .abrp-dot {
             border-radius: 50%;
             border: 2px solid #ffffff;
@@ -100,7 +98,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v2.4</div>
+    <div id="version-tag">v2.6</div>
     <div id="map"></div>
 
     <script>
@@ -163,7 +161,7 @@
                 }
 
                 const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2.4\n(${finalBlock});out center;`;
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2.6\n(${finalBlock});out center;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -189,7 +187,7 @@
                                 const kwRaw = tags["socket:electricity:power"] || tags.maxpower || tags.kw || tags.power || "";
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
-                                // ABRP Layout Sizing Profiles
+                                // Dynamic Step Sizers
                                 let badgeW = 16, badgeH = 16;
                                 if (capacity === 2) { badgeW = 18; badgeH = 18; }
                                 else if (capacity >= 3 && capacity < 5) { badgeW = 22; badgeH = 22; }
@@ -232,54 +230,44 @@
                                     maxDetectedKw = parseFloat(fallbackKw) || 0;
                                 }
 
-                                // Tier 1 Strategy: Calculate standard velocity color background base (ABRP Rule)
-                                let speedColor = "#22c55e"; // Regular AC slow standard
-                                if (maxDetectedKw >= 100) speedColor = "#ef4444"; // Ultra fast tier
-                                else if (maxDetectedKw >= 22) speedColor = "#f97316"; // Fast DC tier
+                                let speedColor = "#22c55e"; 
+                                if (maxDetectedKw >= 100) speedColor = "#ef4444"; 
+                                else if (maxDetectedKw >= 22) speedColor = "#f97316"; 
 
-                                // Tier 2 Strategy: Match Image Vector Assets
-                                let logoUrl = null;
-                                let invertFilter = "filter: brightness(0) invert(1);"; // Knockout logo vectors to crisp white text structures
+                                // FIXED: Inline SVG architecture completely prevents missing graphic frames
+                                let innerHtmlContent = null;
                                 const lowerOp = operator.toLowerCase();
 
                                 if (lowerOp.includes("tesla")) {
-                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/e/e8/Tesla_logo.svg";
-                                    speedColor = "#e82127"; // Strict corporate match
+                                    speedColor = "#e82127";
+                                    innerHtmlContent = `<svg viewBox="0 0 24 24" fill="#ffffff"><path d="M12,2C11.38,2 10.18,2.3 9,3C10.14,4.1 11.23,5.39 12,7C12.73,5.39 13.82,4.1 15,3C13.82,2.3 12.62,2 12,2M12,8C8.84,8 5.76,6.92 3.5,5C4.7,8.85 7.91,12.21 12,13C16.09,12.21 19.3,8.85 20.5,5C18.24,6.92 15.16,8 12,8M12,14C11.5,14 11,14.1 10.5,14.2C11,15.8 11.5,17.4 12,19C12.5,17.4 13,15.8 13.5,14.2C13,14.1 12.5,14 12,14Z"/></svg>`;
                                 } else if (lowerOp.includes("fastned")) {
-                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/e/ee/Fastned_Logo.svg";
                                     speedColor = "#ffc700";
-                                    invertFilter = ""; // Leave natural contrast profile
+                                    innerHtmlContent = `<svg viewBox="0 0 24 24" fill="#222222"><path d="M19,5L5,13H12L9,21L21,11H13L19,5Z"/></svg>`;
                                 } else if (lowerOp.includes("shell")) {
-                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/e/e8/Shell_logo.svg";
                                     speedColor = "#f7d117";
-                                    invertFilter = "";
+                                    innerHtmlContent = `<svg viewBox="0 0 24 24" fill="#e82127"><path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4C14.5,4 16.7,5.1 18.2,6.9C17.5,7.5 16.5,8 15.5,8.2C14.4,7.4 13.2,7 12,7C10.8,7 9.6,7.4 8.5,8.2C7.5,8 6.5,7.5 5.8,6.9C7.3,5.1 9.5,4 12,4Z"/></svg>`;
                                 } else if (lowerOp.includes("allego")) {
-                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/1/14/Allego_logo.svg";
                                     speedColor = "#004b49";
+                                    innerHtmlContent = `<span style="color:#00ffcc; font-size:${badgeH*0.6}px; font-weight:bold; font-family:sans-serif;">A</span>`;
                                 } else if (lowerOp.includes("eneco")) {
-                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/d/de/Eneco_logo.svg";
-                                    invertFilter = "";
-                                } else if (lowerOp.includes("vattenfall") || lowerOp.includes("incharge")) {
-                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/2/29/Vattenfall_logo.svg";
-                                } else if (lowerOp.includes("total")) {
-                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/f/f7/TotalEnergies_logo.svg";
-                                    invertFilter = "";
+                                    speedColor = "#00b050";
+                                    innerHtmlContent = `<span style="color:#ffffff; font-size:${badgeH*0.6}px; font-weight:bold; font-family:sans-serif;">E</span>`;
                                 } else if (lowerOp.includes("ionity")) {
-                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/a/aa/IONITY_Logo.svg";
                                     speedColor = "#111111";
+                                    innerHtmlContent = `<span style="color:#ffffff; font-size:${badgeH*0.5}px; font-weight:black; font-family:sans-serif;">I</span>`;
                                 }
 
                                 let customMarkerIcon;
 
-                                if (logoUrl) {
+                                if (innerHtmlContent) {
                                     customMarkerIcon = L.divIcon({
-                                        html: `<div class="abrp-badge" style="width:${badgeW}px; height:${badgeH}px; background-color:${speedColor};"><img src="${logoUrl}" style="${invertFilter}" alt=""></div>`,
+                                        html: `<div class="abrp-badge" style="width:${badgeW}px; height:${badgeH}px; background-color:${speedColor};">${innerHtmlContent}</div>`,
                                         className: '',
                                         iconSize: [badgeW, badgeH],
                                         iconAnchor: [badgeW/2, badgeH/2]
                                     });
                                 } else {
-                                    // Clean standard unbranded speed-color circle fallback
                                     customMarkerIcon = L.divIcon({
                                         html: `<div class="abrp-dot" style="width:${badgeW - 4}px; height:${badgeH - 4}px; background-color:${speedColor};"></div>`,
                                         className: '',
