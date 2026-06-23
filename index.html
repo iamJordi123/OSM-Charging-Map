@@ -68,6 +68,31 @@
             display: none;
             border: 1px solid #e2e8f0;
         }
+
+        /* ABRP Style Premium Floating Badges */
+        .abrp-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px; /* Rounded pill style shape */
+            border: 2px solid #ffffff;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.35);
+            background-color: #3b82f6; /* Fallback speed background color */
+            transition: transform 0.1s ease;
+        }
+        
+        .abrp-badge img {
+            width: 75%;
+            height: 75%;
+            object-fit: contain;
+        }
+
+        /* Pure circle fallbacks for unbranded stations */
+        .abrp-dot {
+            border-radius: 50%;
+            border: 2px solid #ffffff;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
     </style>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
@@ -161,11 +186,20 @@
                                 const operator = tags.operator || tags.brand || "Unknown Operator";
                                 const capacityRaw = tags.capacity || "1"; 
 
-                                // 1. SCAN DETAILED PLUG SOCKET TAGS
+                                const kwRaw = tags["socket:electricity:power"] || tags.maxpower || tags.kw || tags.power || "";
+                                const capacity = parseInt(capacityRaw, 10) || 1;
+                                
+                                // ABRP Layout Sizing Profiles
+                                let badgeW = 16, badgeH = 16;
+                                if (capacity === 2) { badgeW = 18; badgeH = 18; }
+                                else if (capacity >= 3 && capacity < 5) { badgeW = 22; badgeH = 22; }
+                                else if (capacity >= 5 && capacity < 10) { badgeW = 26; badgeH = 26; }
+                                else if (capacity >= 10 && capacity < 20) { badgeW = 32; badgeH = 32; }
+                                else if (capacity >= 20) { badgeW = 38; badgeH = 38; }
+
                                 const socketProfiles = [];
                                 let maxDetectedKw = 0;
 
-                                // Common OpenStreetMap Socket Identifier Mappings
                                 const targetPlugs = [
                                     { key: 'type2_combo', label: 'CCS' },
                                     { key: 'type2', label: 'Type 2' },
@@ -181,11 +215,8 @@
                                     
                                     if (outputValue || countValue) {
                                         let kwNum = parseFloat(outputValue);
-                                        if (!isNaN(kwNum) && kwNum > maxDetectedKw) {
-                                            maxDetectedKw = kwNum;
-                                        }
+                                        if (!isNaN(kwNum) && kwNum > maxDetectedKw) maxDetectedKw = kwNum;
                                         
-                                        // Formulate clear readable socket line label
                                         let line = `• 🔌 ${plug.label}`;
                                         if (countValue && countValue !== 'yes') line += ` (x${countValue})`;
                                         if (outputValue) {
@@ -196,61 +227,67 @@
                                     }
                                 });
 
-                                // Fallback mapping system to grab high level power parameters if specific socket details are empty
                                 const fallbackKw = tags.maxpower || tags.kw || tags.power || "";
                                 if (maxDetectedKw === 0 && fallbackKw) {
                                     maxDetectedKw = parseFloat(fallbackKw) || 0;
                                 }
 
-                                const capacity = parseInt(capacityRaw, 10) || 1;
-                                
-                                let dotRadius = 6; 
-                                if (capacity === 2) dotRadius = 7;
-                                else if (capacity >= 3 && capacity < 5) dotRadius = 8;
-                                else if (capacity >= 5 && capacity < 10) dotRadius = 9.5;
-                                else if (capacity >= 10 && capacity < 20) dotRadius = 11.5;
-                                else if (capacity >= 20) dotRadius = 14;
+                                // Tier 1 Strategy: Calculate standard velocity color background base (ABRP Rule)
+                                let speedColor = "#22c55e"; // Regular AC slow standard
+                                if (maxDetectedKw >= 100) speedColor = "#ef4444"; // Ultra fast tier
+                                else if (maxDetectedKw >= 22) speedColor = "#f97316"; // Fast DC tier
 
-                                let dotColor = "#3b82f6"; 
-                                let borderColor = "#ffffff"; 
-                                let customWeight = 1.5;
+                                // Tier 2 Strategy: Match Image Vector Assets
+                                let logoUrl = null;
+                                let invertFilter = "filter: brightness(0) invert(1);"; // Knockout logo vectors to crisp white text structures
                                 const lowerOp = operator.toLowerCase();
 
                                 if (lowerOp.includes("tesla")) {
-                                    dotColor = "#e82127";  
+                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/e/e8/Tesla_logo.svg";
+                                    speedColor = "#e82127"; // Strict corporate match
                                 } else if (lowerOp.includes("fastned")) {
-                                    dotColor = "#ffc700";  
-                                    borderColor = "#222222"; 
-                                    customWeight = 2;
+                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/e/ee/Fastned_Logo.svg";
+                                    speedColor = "#ffc700";
+                                    invertFilter = ""; // Leave natural contrast profile
                                 } else if (lowerOp.includes("shell")) {
-                                    dotColor = "#f7d117";  
-                                    borderColor = "#003aa6"; 
-                                    customWeight = 2;
+                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/e/e8/Shell_logo.svg";
+                                    speedColor = "#f7d117";
+                                    invertFilter = "";
                                 } else if (lowerOp.includes("allego")) {
-                                    dotColor = "#004b49";  
-                                    borderColor = "#00ffcc"; 
-                                    customWeight = 2;
+                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/1/14/Allego_logo.svg";
+                                    speedColor = "#004b49";
                                 } else if (lowerOp.includes("eneco")) {
-                                    dotColor = "#00b050";  
+                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/d/de/Eneco_logo.svg";
+                                    invertFilter = "";
                                 } else if (lowerOp.includes("vattenfall") || lowerOp.includes("incharge")) {
-                                    dotColor = "#00a3e0";  
-                                    borderColor = "#0b2240"; 
-                                    customWeight = 2;
+                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/2/29/Vattenfall_logo.svg";
                                 } else if (lowerOp.includes("total")) {
-                                    dotColor = "#ea4335";  
-                                } else if (lowerOp.includes("e-flux") || lowerOp.includes("eflux")) {
-                                    dotColor = "#e6007e";  
+                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/f/f7/TotalEnergies_logo.svg";
+                                    invertFilter = "";
                                 } else if (lowerOp.includes("ionity")) {
-                                    dotColor = "#111111";  
-                                    borderColor = "#ffffff";
-                                    customWeight = 2;
-                                } else if (maxDetectedKw > 0) {
-                                    if (maxDetectedKw >= 100) dotColor = "#ef4444";     
-                                    else if (maxDetectedKw >= 22) dotColor = "#f97316"; 
-                                    else dotColor = "#22c55e";                  
+                                    logoUrl = "https://upload.wikimedia.org/wikipedia/commons/a/aa/IONITY_Logo.svg";
+                                    speedColor = "#111111";
                                 }
 
-                                // 2. RENDER THE PLUG DATA STRUCTURE
+                                let customMarkerIcon;
+
+                                if (logoUrl) {
+                                    customMarkerIcon = L.divIcon({
+                                        html: `<div class="abrp-badge" style="width:${badgeW}px; height:${badgeH}px; background-color:${speedColor};"><img src="${logoUrl}" style="${invertFilter}" alt=""></div>`,
+                                        className: '',
+                                        iconSize: [badgeW, badgeH],
+                                        iconAnchor: [badgeW/2, badgeH/2]
+                                    });
+                                } else {
+                                    // Clean standard unbranded speed-color circle fallback
+                                    customMarkerIcon = L.divIcon({
+                                        html: `<div class="abrp-dot" style="width:${badgeW - 4}px; height:${badgeH - 4}px; background-color:${speedColor};"></div>`,
+                                        className: '',
+                                        iconSize: [badgeW - 4, badgeH - 4],
+                                        iconAnchor: [(badgeW - 4)/2, (badgeH - 4)/2]
+                                    });
+                                }
+
                                 let socketsHtml = "Not specified";
                                 if (socketProfiles.length > 0) {
                                     socketsHtml = "<div style='margin-top: 4px; padding-left: 2px;'>" + socketProfiles.join("<br>") + "</div>";
@@ -267,15 +304,7 @@
                                     </div>
                                 `;
 
-                                const marker = L.circleMarker([lat, lon], {
-                                    radius: dotRadius,
-                                    fillColor: dotColor,
-                                    color: borderColor,
-                                    weight: customWeight, 
-                                    opacity: 1,
-                                    fillOpacity: 0.85
-                                }).bindPopup(popupContent);
-
+                                const marker = L.marker([lat, lon], { icon: customMarkerIcon }).bindPopup(popupContent);
                                 markerLayer.addLayer(marker);
                             }
                         });
