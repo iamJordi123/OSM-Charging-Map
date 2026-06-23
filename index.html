@@ -8,63 +8,344 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
     
     <style>
-        html, body { margin: 0; padding: 0; width: 100%; height: 100%; font-family: sans-serif; background: #cbd5e1; }
-        #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
-        #version-tag { position: absolute; bottom: 10px; left: 10px; z-index: 1000; background: rgba(0,0,0,0.7); color: #0f0; padding: 2px 6px; font-size: 10px; font-family: monospace; border-radius: 3px; }
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #cbd5e1;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        }
         
-        .abrp-badge { display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
-        .abrp-badge svg { width: 65%; height: 65%; fill: #fff; }
-        .abrp-dot { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 2px 3px rgba(0,0,0,0.3); }
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1;
+        }
+
+        .leaflet-bar a.leaflet-control-locate {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #version-tag {
+            position: absolute;
+            bottom: 20px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: monospace;
+            pointer-events: none;
+        }
+
+        #zoom-notice {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            color: #334155;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+            pointer-events: none;
+            display: none;
+            border: 1px solid #e2e8f0;
+        }
+
+        /* ABRP Style Premium Floating Badges */
+        .abrp-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%; 
+            border: 2px solid #ffffff;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.35);
+            transition: transform 0.1s ease;
+        }
+        
+        /* Ensures any inline SVG we put inside the badge fits perfectly */
+        .abrp-badge svg {
+            width: 65%;
+            height: 65%;
+            fill: #ffffff; /* Forces the SVG path to be pure white */
+        }
+
+        .abrp-dot {
+            border-radius: 50%;
+            border: 2px solid #ffffff;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
     </style>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 </head>
 <body>
-    <div id="version-tag">v2.9</div>
+
+    <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
+    <div id="version-tag">v2.7</div>
     <div id="map"></div>
 
     <script>
-        const map = L.map('map').setView([52.1326, 5.2913], 8);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-        const markerLayer = L.layerGroup().addTo(map);
-
-        async function updateMap() {
-            const bounds = map.getBounds();
-            const query = `[out:json];node["amenity"="charging_station"](${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()});out center;`;
-            const response = await fetch(`https://overpass.openstreetmap.fr/api/interpreter?data=${encodeURIComponent(query)}`);
-            const data = await response.json();
+        window.addEventListener('DOMContentLoaded', () => {
             
-            markerLayer.clearLayers();
-            data.elements.forEach(el => {
-                const tags = el.tags || {};
-                const operator = (tags.operator || tags.brand || "").toLowerCase();
-                const kw = parseFloat(tags.kw || tags.maxpower || 0);
-                const color = kw >= 100 ? '#ef4444' : (kw >= 22 ? '#f97316' : '#22c55e');
+            const savedLat = localStorage.getItem('map_lat');
+            const savedLng = localStorage.getItem('map_lng');
+            const savedZoom = localStorage.getItem('map_zoom');
 
-                let icon;
-                if (operator.includes("tesla")) {
-                    icon = L.divIcon({
-                        className: '',
-                        html: `<div class="abrp-badge" style="width:30px; height:30px; background-color:#e82127;">
-                                <svg viewBox="0 0 24 24"><path d="M12,21.3C12,21.3 12.3,10.6 12.3,9.5C12.3,8.4 14.2,7.3 15.3,7L15.3,6.2C13.4,6.4 12,7 12,7C12,7 10.6,6.4 8.7,6.2L8.7,7C9.8,7.3 11.7,8.4 11.7,9.5C11.7,10.6 12,21.3 12,21.3M4.6,5L4.8,4.2C7,3.3 9.4,2.9 12,2.9C14.6,2.9 17,3.3 19.2,4.2L19.4,5C17.1,4.2 14.6,3.8 12,3.8C9.4,3.8 6.9,4.2 4.6,5Z"/></svg>
-                               </div>`,
-                        iconSize: [30, 30], iconAnchor: [15, 15]
-                    });
-                } else {
-                    icon = L.divIcon({
-                        className: '',
-                        html: `<div class="abrp-dot" style="width:14px; height:14px; background-color:${color};"></div>`,
-                        iconSize: [14, 14], iconAnchor: [7, 7]
-                    });
-                }
-                
-                L.marker([el.lat || el.center.lat, el.lon || el.center.lon], { icon })
-                 .bindPopup(`<b>${tags.operator || "Station"}</b><br>${kw} kW`)
-                 .addTo(markerLayer);
+            let initialCenter = [52.1326, 5.2913]; 
+            let initialZoom = 8;                   
+
+            if (savedLat && savedLng && savedZoom) {
+                initialCenter = [parseFloat(savedLat), parseFloat(savedLng)];
+                initialZoom = parseInt(savedZoom, 10);
+            }
+
+            const map = L.map('map', {
+                center: initialCenter,
+                zoom: initialZoom,
+                zoomControl: true,
+                tap: false 
             });
-        }
 
-        map.on('moveend', updateMap);
-        updateMap();
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors | Data via <a href="https://wiki.openstreetmap.org/wiki/Overpass_API" target="_blank">Overpass API</a>'
+            }).addTo(map);
+
+            let markerLayer = L.layerGroup().addTo(map);
+            let userLocationMarker = null;
+            const zoomNotice = document.getElementById('zoom-notice');
+            let debounceTimeout;
+            
+            let isPopupActive = false;
+
+            async function fetchChargingStations() {
+                if (isPopupActive) return;
+                if (!map.getBounds()) return;
+
+                const currentZoom = map.getZoom();
+
+                if (currentZoom < 13) {
+                    markerLayer.clearLayers();
+                    zoomNotice.style.display = 'block';
+                    return;
+                } else {
+                    zoomNotice.style.display = 'none';
+                }
+
+                const bounds = map.getBounds();
+                const south = bounds.getSouth();
+                const west = bounds.getWest();
+                const north = bounds.getNorth();
+                const east = bounds.getEast();
+
+                let overpassBlock = 'node["amenity"="charging_station"]({bounds}); way["amenity"="charging_station"]({bounds});';
+                if (currentZoom === 13 || currentZoom === 14) {
+                    overpassBlock = 'node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2);';
+                }
+
+                const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2.7\n(${finalBlock});out center;`;
+                
+                const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
+                url.searchParams.append('data', query);
+
+                try {
+                    const response = await fetch(url.toString(), { method: "GET" });
+                    const data = await response.json();
+                    
+                    if (isPopupActive) return;
+                    
+                    markerLayer.clearLayers();
+
+                    if (data && data.elements) {
+                        data.elements.forEach(element => {
+                            const lat = element.lat || (element.center && element.center.lat);
+                            const lon = element.lon || (element.center && element.center.lon);
+                            
+                            if (lat && lon) {
+                                const tags = element.tags || {};
+                                const operator = tags.operator || tags.brand || "Unknown Operator";
+                                const capacityRaw = tags.capacity || "1"; 
+
+                                const kwRaw = tags["socket:electricity:power"] || tags.maxpower || tags.kw || tags.power || "";
+                                const capacity = parseInt(capacityRaw, 10) || 1;
+                                
+                                // Dynamic Step Sizers based on outlet count
+                                let badgeW = 16, badgeH = 16;
+                                if (capacity === 2) { badgeW = 18; badgeH = 18; }
+                                else if (capacity >= 3 && capacity < 5) { badgeW = 22; badgeH = 22; }
+                                else if (capacity >= 5 && capacity < 10) { badgeW = 26; badgeH = 26; }
+                                else if (capacity >= 10 && capacity < 20) { badgeW = 32; badgeH = 32; }
+                                else if (capacity >= 20) { badgeW = 38; badgeH = 38; }
+
+                                const socketProfiles = [];
+                                let maxDetectedKw = 0;
+
+                                const targetPlugs = [
+                                    { key: 'type2_combo', label: 'CCS' },
+                                    { key: 'type2', label: 'Type 2' },
+                                    { key: 'chademo', label: 'CHAdeMO' },
+                                    { key: 'tesla_supercharger', label: 'Tesla Supercharger' },
+                                    { key: 'tesla_destination', label: 'Tesla Dest.' },
+                                    { key: 'schuko', label: 'Schuko' }
+                                ];
+
+                                targetPlugs.forEach(plug => {
+                                    const outputValue = tags[`socket:${plug.key}:output`];
+                                    const countValue = tags[`socket:${plug.key}`];
+                                    
+                                    if (outputValue || countValue) {
+                                        let kwNum = parseFloat(outputValue);
+                                        if (!isNaN(kwNum) && kwNum > maxDetectedKw) maxDetectedKw = kwNum;
+                                        
+                                        let line = `• 🔌 ${plug.label}`;
+                                        if (countValue && countValue !== 'yes') line += ` (x${countValue})`;
+                                        if (outputValue) {
+                                            const formattedOutput = isNaN(kwNum) ? outputValue : `${kwNum} kW`;
+                                            line += `: <strong>${formattedOutput}</strong>`;
+                                        }
+                                        socketProfiles.push(line);
+                                    }
+                                });
+
+                                const fallbackKw = tags.maxpower || tags.kw || tags.power || "";
+                                if (maxDetectedKw === 0 && fallbackKw) {
+                                    maxDetectedKw = parseFloat(fallbackKw) || 0;
+                                }
+
+                                // Base color logic based on speed
+                                let speedColor = "#22c55e"; // Regular AC
+                                if (maxDetectedKw >= 100) speedColor = "#ef4444"; // Ultra fast DC
+                                else if (maxDetectedKw >= 22) speedColor = "#f97316"; // Fast DC
+
+                                let innerHtmlContent = null;
+                                const lowerOp = operator.toLowerCase();
+
+                                // THE BULLETPROOF INLINE SVG ENGINE
+                                if (lowerOp.includes("tesla")) {
+                                    speedColor = "#e82127"; // Tesla Red
+                                    // This is the mathematical path that draws the Tesla T. 
+                                    // It cannot break unless the user deletes the code.
+                                    innerHtmlContent = `
+                                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M12,21.3C12,21.3 12.3,10.6 12.3,9.5C12.3,8.4 14.2,7.3 15.3,7L15.3,6.2C13.4,6.4 12,7 12,7C12,7 10.6,6.4 8.7,6.2L8.7,7C9.8,7.3 11.7,8.4 11.7,9.5C11.7,10.6 12,21.3 12,21.3M4.6,5L4.8,4.2C7,3.3 9.4,2.9 12,2.9C14.6,2.9 17,3.3 19.2,4.2L19.4,5C17.1,4.2 14.6,3.8 12,3.8C9.4,3.8 6.9,4.2 4.6,5Z"/>
+                                        </svg>
+                                    `;
+                                } 
+
+                                let customMarkerIcon;
+
+                                // If we have an inline SVG graphic (Tesla), render the full badge
+                                if (innerHtmlContent) {
+                                    customMarkerIcon = L.divIcon({
+                                        html: `<div class="abrp-badge" style="width:${badgeW}px; height:${badgeH}px; background-color:${speedColor};">${innerHtmlContent}</div>`,
+                                        className: '',
+                                        iconSize: [badgeW, badgeH],
+                                        iconAnchor: [badgeW/2, badgeH/2]
+                                    });
+                                } else {
+                                    // Standard speed-color circles for everyone else
+                                    customMarkerIcon = L.divIcon({
+                                        html: `<div class="abrp-dot" style="width:${badgeW - 4}px; height:${badgeH - 4}px; background-color:${speedColor};"></div>`,
+                                        className: '',
+                                        iconSize: [badgeW - 4, badgeH - 4],
+                                        iconAnchor: [(badgeW - 4)/2, (badgeH - 4)/2]
+                                    });
+                                }
+
+                                let socketsHtml = "Not specified";
+                                if (socketProfiles.length > 0) {
+                                    socketsHtml = "<div style='margin-top: 4px; padding-left: 2px;'>" + socketProfiles.join("<br>") + "</div>";
+                                } else if (fallbackKw) {
+                                    const fallbackNum = parseFloat(fallbackKw);
+                                    socketsHtml = isNaN(fallbackNum) ? fallbackKw : `${fallbackNum} kW`;
+                                }
+
+                                const popupContent = `
+                                    <div style="font-size: 14px; line-height: 1.4; font-family: sans-serif; min-width: 175px;">
+                                        <strong>🏢 ${operator}</strong><br>
+                                        ⚡ Power Output:<br>${socketsHtml}<br>
+                                        🔢 Total Outlets: ${capacityRaw}
+                                    </div>
+                                `;
+
+                                const marker = L.marker([lat, lon], { icon: customMarkerIcon }).bindPopup(popupContent);
+                                markerLayer.addLayer(marker);
+                            }
+                        });
+                    }
+                } catch (error) {
+                    console.error("Fetch exception details:", error);
+                }
+            }
+
+            map.on('popupopen', () => { isPopupActive = true; });
+            map.on('popupclose', () => { 
+                isPopupActive = false; 
+                onMapChange();
+            });
+
+            function onMapChange() {
+                if (isPopupActive) return; 
+                
+                const center = map.getCenter();
+                localStorage.setItem('map_lat', center.lat);
+                localStorage.setItem('map_lng', center.lng);
+                localStorage.setItem('map_zoom', map.getZoom());
+
+                clearTimeout(debounceTimeout);
+                debounceTimeout = setTimeout(fetchChargingStations, 300);
+            }
+            map.on('moveend', onMapChange);
+            
+            map.on('locationfound', (e) => {
+                if (userLocationMarker) {
+                    map.removeLayer(userLocationMarker);
+                }
+                userLocationMarker = L.circle(e.latlng, { radius: e.accuracy / 2, color: '#0078ff', weight: 2, fillOpacity: 0.15 }).addTo(map);
+            });
+
+            map.on('locationerror', () => {
+                alert("Location access denied or unavailable.");
+            });
+
+            map.whenReady(() => {
+                fetchChargingStations();
+            });
+
+            const zoomControlContainer = document.querySelector('.leaflet-control-zoom');
+            if (zoomControlContainer) {
+                const locateBtn = L.DomUtil.create('a', 'leaflet-control-locate', zoomControlContainer);
+                locateBtn.innerHTML = "⌖";
+                locateBtn.href = "#";
+                locateBtn.title = "Find My Location";
+                locateBtn.role = "button";
+                
+                locateBtn.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    map.locate({ setView: true, maxZoom: 15 });
+                };
+            }
+        });
     </script>
 </body>
 </html>
