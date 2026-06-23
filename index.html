@@ -1,6 +1,6 @@
 <script>
-        // 1. Initialize the map centered on the Netherlands
-        const map = L.map('map').setView([52.1326, 5.2913], 13); 
+        // 1. Initialize map without forcing a static view
+        const map = L.map('map'); 
 
         // 2. Add OpenStreetMap background tiles
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -8,10 +8,8 @@
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        // Layer group to manage charging station markers
         let markerLayer = L.layerGroup().addTo(map);
         
-        // Define strict bounding box limits for the Netherlands
         const NL_BOUNDS = {
             south: 50.75,
             west: 3.2,
@@ -21,9 +19,8 @@
 
         let debounceTimeout;
 
-        // 3. Optimized function to fetch charging stations
+        // 3. Fetch data based entirely on where you are currently looking
         async function fetchChargingStations() {
-            // OPTIMIZATION 1: Don't load data if zoomed out too far (saves data & prevents lag)
             if (map.getZoom() < 12) {
                 markerLayer.clearLayers();
                 return;
@@ -31,13 +28,11 @@
 
             const bounds = map.getBounds();
             
-            // OPTIMIZATION 2: Restrict calculations to only the Netherlands boundaries
             const south = Math.max(bounds.getSouth(), NL_BOUNDS.south);
             const west = Math.max(bounds.getWest(), NL_BOUNDS.west);
             const north = Math.min(bounds.getNorth(), NL_BOUNDS.north);
             const east = Math.min(bounds.getEast(), NL_BOUNDS.east);
 
-            // If the visible map screen is entirely outside the Netherlands, don't query anything
             if (south > north || west > east) {
                 markerLayer.clearLayers();
                 return;
@@ -93,35 +88,38 @@
             }
         }
 
-        // OPTIMIZATION 3: Debounce map movements (wait 400ms after user stops moving before updating)
+        // Trigger updates when you drag or zoom
         function onMapChange() {
             clearTimeout(debounceTimeout);
             debounceTimeout = setTimeout(fetchChargingStations, 400);
         }
-
         map.on('moveend', onMapChange);
         
-        // Initial load
-        fetchChargingStations();
+        // 4. Automatically locate user on startup
+        map.locate({ setView: true, maxZoom: 14 });
 
-        // 4. Mobile GPS Locate Control
+        map.on('locationfound', (e) => {
+            L.circle(e.latlng, e.accuracy / 2).addTo(map);
+            // 'setView' from locate triggers 'moveend', which automatically runs fetchChargingStations()
+        });
+
+        map.on('locationerror', () => {
+            // Fallback to center of NL if location permissions are denied
+            map.setView([52.1326, 5.2913], 11);
+            fetchChargingStations();
+        });
+
+        // 5. Floating Locate Button (for manual re-tracking)
         const LocateControl = L.Control.extend({
             options: { position: 'topleft' },
             onAdd: function() {
                 const btn = L.DomUtil.create('button', 'locate-btn');
                 btn.innerHTML = "📍 Find Me";
                 btn.onclick = function() {
-                    map.locate({ setView: true, maxZoom: 16 });
+                    map.locate({ setView: true, maxZoom: 15 });
                 };
                 return btn;
             }
         });
         map.addControl(new LocateControl());
-
-        map.on('locationfound', (e) => {
-            L.circle(e.latlng, e.accuracy / 2).addTo(map);
-        });
-        map.on('locationerror', () => {
-            alert("Could not access your location. Please check your GPS permissions.");
-        });
     </script>
