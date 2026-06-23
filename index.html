@@ -75,7 +75,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v1.9</div>
+    <div id="version-tag">v2.0</div>
     <div id="map"></div>
 
     <script>
@@ -96,10 +96,10 @@
             const map = L.map('map', {
                 center: initialCenter,
                 zoom: initialZoom,
-                zoomControl: true
+                zoomControl: true,
+                tap: false // Native touch-device interaction fix
             });
 
-            // FIXED: Fully compliant legal attribution credit for both Tiles and Data nodes
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors | Data via <a href="https://wiki.openstreetmap.org/wiki/Overpass_API" target="_blank">Overpass API</a>'
@@ -109,8 +109,13 @@
             let userLocationMarker = null;
             const zoomNotice = document.getElementById('zoom-notice');
             let debounceTimeout;
+            
+            // Safety state toggles to prevent autoPan movement wiping out active popups
+            let isPopupActive = false;
 
             async function fetchChargingStations() {
+                // Completely skip clearing/fetching data if a user is explicitly browsing an open card popup
+                if (isPopupActive) return;
                 if (!map.getBounds()) return;
 
                 const currentZoom = map.getZoom();
@@ -135,7 +140,6 @@
                 url.searchParams.append('data', query);
 
                 try {
-                    // FIXED: Injected identification header naming our specific application build as required by policy
                     const response = await fetch(url.toString(), {
                         method: "GET",
                         headers: {
@@ -143,6 +147,9 @@
                         }
                     });
                     const data = await response.json();
+                    
+                    // Extra safety verification: skip layer wipe if popup was engaged while fetch was mid-flight
+                    if (isPopupActive) return;
                     
                     markerLayer.clearLayers();
 
@@ -154,8 +161,19 @@
                             if (lat && lon) {
                                 const tags = element.tags || {};
                                 const operator = tags.operator || tags.brand || "Unknown Operator";
-                                const capacity = tags.capacity || "Not specified";
+                                const capacityRaw = tags.capacity || "1"; 
                                 const kw = tags.kw || "";
+
+                                // Parse capacity safely to define custom stepping radiuses
+                                const capacity = parseInt(capacityRaw, 10) || 1;
+                                
+                                // FIXED: Custom proportional sizing engine
+                                let dotRadius = 6; // Default sizing for 1
+                                if (capacity === 2) dotRadius = 7;
+                                else if (capacity >= 3 && capacity < 5) dotRadius = 8;
+                                else if (capacity >= 5 && capacity < 10) dotRadius = 9.5;
+                                else if (capacity >= 10 && capacity < 20) dotRadius = 11.5;
+                                else if (capacity >= 20) dotRadius = 14;
 
                                 let dotColor = "#3b82f6"; 
                                 if (kw) {
@@ -169,12 +187,12 @@
                                     <div style="font-size: 14px; line-height: 1.4; font-family: sans-serif; min-width: 150px;">
                                         <strong>🏢 ${operator}</strong><br>
                                         ⚡ Power: ${kw ? kw + ' kW' : 'Not specified'}<br>
-                                        🔌 Outlets: ${capacity}
+                                        🔌 Outlets: ${capacityRaw}
                                     </div>
                                 `;
 
                                 const marker = L.circleMarker([lat, lon], {
-                                    radius: 7,
+                                    radius: dotRadius,
                                     fillColor: dotColor,
                                     color: "#ffffff",
                                     weight: 1.5,
@@ -191,7 +209,17 @@
                 }
             }
 
+            // Track global popup states directly against the main viewport frame
+            map.on('popupopen', () => { isPopupActive = true; });
+            map.on('popupclose', () => { 
+                isPopupActive = false; 
+                // Re-trigger a soft assessment pass when the user dismisses their card
+                onMapChange();
+            });
+
             function onMapChange() {
+                if (isPopupActive) return; // Freeze caching states if popup window frame is on screen
+                
                 const center = map.getCenter();
                 localStorage.setItem('map_lat', center.lat);
                 localStorage.setItem('map_lng', center.lng);
