@@ -69,21 +69,22 @@
             border: 1px solid #e2e8f0;
         }
 
-        /* FIXED: True ABRP Circle Badge Styling */
+        /* ABRP Style Premium Floating Badges */
         .abrp-badge {
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 50%; /* Changed from 8px to 50% for a perfect premium circle look */
+            border-radius: 50%; 
             border: 2px solid #ffffff;
             box-shadow: 0 3px 8px rgba(0,0,0,0.35);
             transition: transform 0.1s ease;
         }
         
-        .abrp-badge svg, .abrp-badge img {
-            width: 70%;
-            height: 70%;
-            object-fit: contain;
+        /* Ensures any inline SVG we put inside the badge fits perfectly */
+        .abrp-badge svg {
+            width: 65%;
+            height: 65%;
+            fill: #ffffff; /* Forces the SVG path to be pure white */
         }
 
         .abrp-dot {
@@ -98,7 +99,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v2.6</div>
+    <div id="version-tag">v2.7</div>
     <div id="map"></div>
 
     <script>
@@ -161,7 +162,7 @@
                 }
 
                 const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2.6\n(${finalBlock});out center;`;
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2.7\n(${finalBlock});out center;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -187,7 +188,7 @@
                                 const kwRaw = tags["socket:electricity:power"] || tags.maxpower || tags.kw || tags.power || "";
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
-                                // Dynamic Step Sizers
+                                // Dynamic Step Sizers based on outlet count
                                 let badgeW = 16, badgeH = 16;
                                 if (capacity === 2) { badgeW = 18; badgeH = 18; }
                                 else if (capacity >= 3 && capacity < 5) { badgeW = 22; badgeH = 22; }
@@ -230,36 +231,29 @@
                                     maxDetectedKw = parseFloat(fallbackKw) || 0;
                                 }
 
-                                let speedColor = "#22c55e"; 
-                                if (maxDetectedKw >= 100) speedColor = "#ef4444"; 
-                                else if (maxDetectedKw >= 22) speedColor = "#f97316"; 
+                                // Base color logic based on speed
+                                let speedColor = "#22c55e"; // Regular AC
+                                if (maxDetectedKw >= 100) speedColor = "#ef4444"; // Ultra fast DC
+                                else if (maxDetectedKw >= 22) speedColor = "#f97316"; // Fast DC
 
-                                // FIXED: Inline SVG architecture completely prevents missing graphic frames
                                 let innerHtmlContent = null;
                                 const lowerOp = operator.toLowerCase();
 
+                                // THE BULLETPROOF INLINE SVG ENGINE
                                 if (lowerOp.includes("tesla")) {
-                                    speedColor = "#e82127";
-                                    innerHtmlContent = `<svg viewBox="0 0 24 24" fill="#ffffff"><path d="M12,2C11.38,2 10.18,2.3 9,3C10.14,4.1 11.23,5.39 12,7C12.73,5.39 13.82,4.1 15,3C13.82,2.3 12.62,2 12,2M12,8C8.84,8 5.76,6.92 3.5,5C4.7,8.85 7.91,12.21 12,13C16.09,12.21 19.3,8.85 20.5,5C18.24,6.92 15.16,8 12,8M12,14C11.5,14 11,14.1 10.5,14.2C11,15.8 11.5,17.4 12,19C12.5,17.4 13,15.8 13.5,14.2C13,14.1 12.5,14 12,14Z"/></svg>`;
-                                } else if (lowerOp.includes("fastned")) {
-                                    speedColor = "#ffc700";
-                                    innerHtmlContent = `<svg viewBox="0 0 24 24" fill="#222222"><path d="M19,5L5,13H12L9,21L21,11H13L19,5Z"/></svg>`;
-                                } else if (lowerOp.includes("shell")) {
-                                    speedColor = "#f7d117";
-                                    innerHtmlContent = `<svg viewBox="0 0 24 24" fill="#e82127"><path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4C14.5,4 16.7,5.1 18.2,6.9C17.5,7.5 16.5,8 15.5,8.2C14.4,7.4 13.2,7 12,7C10.8,7 9.6,7.4 8.5,8.2C7.5,8 6.5,7.5 5.8,6.9C7.3,5.1 9.5,4 12,4Z"/></svg>`;
-                                } else if (lowerOp.includes("allego")) {
-                                    speedColor = "#004b49";
-                                    innerHtmlContent = `<span style="color:#00ffcc; font-size:${badgeH*0.6}px; font-weight:bold; font-family:sans-serif;">A</span>`;
-                                } else if (lowerOp.includes("eneco")) {
-                                    speedColor = "#00b050";
-                                    innerHtmlContent = `<span style="color:#ffffff; font-size:${badgeH*0.6}px; font-weight:bold; font-family:sans-serif;">E</span>`;
-                                } else if (lowerOp.includes("ionity")) {
-                                    speedColor = "#111111";
-                                    innerHtmlContent = `<span style="color:#ffffff; font-size:${badgeH*0.5}px; font-weight:black; font-family:sans-serif;">I</span>`;
-                                }
+                                    speedColor = "#e82127"; // Tesla Red
+                                    // This is the mathematical path that draws the Tesla T. 
+                                    // It cannot break unless the user deletes the code.
+                                    innerHtmlContent = `
+                                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M12,21.3C12,21.3 12.3,10.6 12.3,9.5C12.3,8.4 14.2,7.3 15.3,7L15.3,6.2C13.4,6.4 12,7 12,7C12,7 10.6,6.4 8.7,6.2L8.7,7C9.8,7.3 11.7,8.4 11.7,9.5C11.7,10.6 12,21.3 12,21.3M4.6,5L4.8,4.2C7,3.3 9.4,2.9 12,2.9C14.6,2.9 17,3.3 19.2,4.2L19.4,5C17.1,4.2 14.6,3.8 12,3.8C9.4,3.8 6.9,4.2 4.6,5Z"/>
+                                        </svg>
+                                    `;
+                                } 
 
                                 let customMarkerIcon;
 
+                                // If we have an inline SVG graphic (Tesla), render the full badge
                                 if (innerHtmlContent) {
                                     customMarkerIcon = L.divIcon({
                                         html: `<div class="abrp-badge" style="width:${badgeW}px; height:${badgeH}px; background-color:${speedColor};">${innerHtmlContent}</div>`,
@@ -268,6 +262,7 @@
                                         iconAnchor: [badgeW/2, badgeH/2]
                                     });
                                 } else {
+                                    // Standard speed-color circles for everyone else
                                     customMarkerIcon = L.divIcon({
                                         html: `<div class="abrp-dot" style="width:${badgeW - 4}px; height:${badgeH - 4}px; background-color:${speedColor};"></div>`,
                                         className: '',
