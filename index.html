@@ -75,7 +75,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v2.2</div>
+    <div id="version-tag">v2.3</div>
     <div id="map"></div>
 
     <script>
@@ -118,6 +118,7 @@
 
                 const currentZoom = map.getZoom();
 
+                // Base restriction check: Don't load anything if zoomed too far out
                 if (currentZoom < 13) {
                     markerLayer.clearLayers();
                     zoomNotice.style.display = 'block';
@@ -132,14 +133,19 @@
                 const north = bounds.getNorth();
                 const east = bounds.getEast();
 
-                // FIXED: Embedded the identification comment natively to protect CORS status
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2\n(node["amenity"="charging_station"](${south},${west},${north},${east});way["amenity"="charging_station"](${south},${west},${north},${east}););out center;`;
+                // FIXED: Dynamic capacity filtering based on your current zoom depth
+                let capacityFilter = '';
+                if (currentZoom === 13 || currentZoom === 14) {
+                    // Only request stations that explicitly have a capacity of 3 or more nodes
+                    capacityFilter = '["capacity"!~"^(1|2)$"]';
+                }
+
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2.3\n(node["amenity"="charging_station"]${capacityFilter}(${south},${west},${north},${east});way["amenity"="charging_station"]${capacityFilter}(${south},${west},${north},${east}););out center;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
 
                 try {
-                    // FIXED: Dropped the custom header to clear the preflight blockade entirely
                     const response = await fetch(url.toString(), { method: "GET" });
                     const data = await response.json();
                     
@@ -156,8 +162,10 @@
                                 const tags = element.tags || {};
                                 const operator = tags.operator || tags.brand || "Unknown Operator";
                                 const capacityRaw = tags.capacity || "1"; 
-                                const kw = tags.kw || "";
 
+                                // FIXED: Multi-layered fallback tracker to reliably grab charger power ratings
+                                const kwRaw = tags["socket:electricity:power"] || tags.maxpower || tags.kw || tags.power || "";
+                                
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
                                 let dotRadius = 6; 
@@ -178,17 +186,25 @@
                                 } else if (lowerOp.includes("shell")) {
                                     dotColor = "#f7d117";  
                                     borderColor = "#003aa6"; 
-                                } else if (kw) {
-                                    const power = parseFloat(kw);
+                                } else if (kwRaw) {
+                                    const power = parseFloat(kwRaw);
                                     if (power >= 100) dotColor = "#ef4444";     
                                     else if (power >= 22) dotColor = "#f97316"; 
                                     else dotColor = "#22c55e";                  
                                 }
 
+                                // Format power display nicely
+                                let powerDisplay = "Not specified";
+                                if (kwRaw) {
+                                    // Strip any clean trailing string units (like 'kW') if already added by mapper
+                                    const powerNum = parseFloat(kwRaw);
+                                    powerDisplay = isNaN(powerNum) ? kwRaw : `${powerNum} kW`;
+                                }
+
                                 const popupContent = `
                                     <div style="font-size: 14px; line-height: 1.4; font-family: sans-serif; min-width: 150px;">
                                         <strong>🏢 ${operator}</strong><br>
-                                        ⚡ Power: ${kw ? kw + ' kW' : 'Not specified'}<br>
+                                        ⚡ Power: ${powerDisplay}<br>
                                         🔌 Outlets: ${capacityRaw}
                                     </div>
                                 `;
