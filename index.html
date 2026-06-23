@@ -5,17 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>OSM EV Charging Map</title>
     
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
     
     <style>
-        /* Cross-platform full-screen layout framework */
         html, body {
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #e9ecef;
+            background-color: #cbd5e1;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
         }
         
@@ -26,10 +25,8 @@
             left: 0;
             right: 0;
             z-index: 1;
-            display: block;
         }
         
-        /* Modernized UI control button for PC & Mobile tap targets */
         .locate-btn {
             background: white;
             padding: 8px 12px;
@@ -39,13 +36,8 @@
             font-weight: bold;
             font-size: 14px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            transition: background 0.2s;
-        }
-        .locate-btn:hover {
-            background: #f4f4f4;
         }
 
-        /* Responsive Version tag overlay */
         #version-tag {
             position: absolute;
             bottom: 20px;
@@ -60,173 +52,162 @@
             pointer-events: none;
         }
     </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 </head>
 <body>
 
-    <div id="version-tag">v1.5 (Secure Protocol)</div>
-
+    <div id="version-tag">v1.0</div>
     <div id="map"></div>
 
     <script>
-        window.addEventListener('error', function(e) {
-            const errorDiv = document.createElement('div');
-            errorDiv.style.position = 'absolute';
-            errorDiv.style.top = '0';
-            errorDiv.style.left = '0';
-            errorDiv.style.width = '100%';
-            errorDiv.style.height = '100%';
-            errorDiv.style.background = 'rgba(217, 4, 4, 0.95)';
-            errorDiv.style.color = 'white';
-            errorDiv.style.padding = '30px';
-            errorDiv.style.zIndex = '99999';
-            errorDiv.style.fontFamily = 'monospace';
-            errorDiv.innerHTML = `
-                <h1 style="margin-top:0;">🚨 JS Engine Error</h1>
-                <p><strong>Message:</strong> ${e.message}</p>
-                <p><strong>File:</strong> ${e.filename}</p>
-                <p><strong>Line:</strong> ${e.lineno}</p>
-            `;
-            document.body.appendChild(errorDiv);
-        });
-    </script>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
-    <script>
-        // 1. Initialize map window looking at the Netherlands baseline
-        const map = L.map('map', {
-            center: [52.1326, 5.2913],
-            zoom: 12,
-            zoomControl: true
-        });
-
-        // 2. FIXED: Using secure HTTPS tile endpoints to clear modern browser security filters
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
-
-        // Instantly force size matching calculations
-        map.invalidateSize();
-
-        let markerLayer = L.layerGroup().addTo(map);
-        
-        const NL_BOUNDS = {
-            south: 50.75,
-            west: 3.2,
-            north: 53.7,
-            east: 7.25
-        };
-
-        let debounceTimeout;
-
-        // 3. Optimized Bounding Box Data Pull Function
-        async function fetchChargingStations() {
-            if (map.getZoom() < 12) {
-                markerLayer.clearLayers();
-                return;
-            }
-
-            const bounds = map.getBounds();
+        // Wait until Leaflet is fully parsed by the browser
+        window.addEventListener('DOMContentLoaded', () => {
             
-            const south = Math.max(bounds.getSouth(), NL_BOUNDS.south);
-            const west = Math.max(bounds.getWest(), NL_BOUNDS.west);
-            const north = Math.min(bounds.getNorth(), NL_BOUNDS.north);
-            const east = Math.min(bounds.getEast(), NL_BOUNDS.east);
+            // 1. Setup Map Window (Centered on the Netherlands)
+            const map = L.map('map', {
+                center: [52.1326, 5.2913],
+                zoom: 12,
+                zoomControl: true
+            });
 
-            if (south > north || west > east) {
-                markerLayer.clearLayers();
-                return;
-            }
+            // 2. Load HTTPS OpenStreetMap Tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
 
-            const query = `
-                [out:json][timeout:15];
-                (
-                  node["amenity"="charging_station"](${south},${west},${north},${east});
-                  way["amenity"="charging_station"](${south},${west},${north},${east});
-                );
-                out body center;
-            `;
+            // Layer to hold charging dots
+            let markerLayer = L.layerGroup().addTo(map);
             
-            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+            // Boundaries for the Netherlands
+            const NL_BOUNDS = {
+                south: 50.75,
+                west: 3.2,
+                north: 53.7,
+                east: 7.25
+            };
 
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                markerLayer.clearLayers();
+            let debounceTimeout;
 
-                if (data && data.elements) {
-                    data.elements.forEach(element => {
-                        const lat = element.lat || (element.center && element.center.lat);
-                        const lon = element.lon || (element.center && element.center.lon);
-                        
-                        if (lat && lon) {
-                            const tags = element.tags || {};
-                            const operator = tags.operator || "Unknown Operator";
-                            const capacity = tags.capacity || "Unknown";
-                            const kw = tags.kw || "";
-
-                            let markerColor = "blue"; 
-                            if (kw) {
-                                const power = parseFloat(kw);
-                                if (power >= 50) markerColor = "red";       
-                                else if (power >= 22) markerColor = "orange"; 
-                                else markerColor = "green";                  
-                            }
-
-                            const popupContent = `
-                                <div style="font-size: 14px; line-height: 1.4;">
-                                    <strong>🏢 ${operator}</strong><br>
-                                    ⚡ Power: ${kw ? kw + ' kW' : 'Not specified'}<br>
-                                    🔌 Outlets: ${capacity}
-                                </div>
-                            `;
-
-                            const marker = L.marker([lat, lon]).bindPopup(popupContent);
-                            markerLayer.addLayer(marker);
-                        }
-                    });
+            // 3. Charging Station Data Engine
+            async function fetchChargingStations() {
+                // Don't fetch if user is zoomed out too far (prevents system lag)
+                if (map.getZoom() < 12) {
+                    markerLayer.clearLayers();
+                    return;
                 }
-            } catch (error) {
-                console.error("Error fetching charging stations:", error);
+
+                const bounds = map.getBounds();
+                const south = Math.max(bounds.getSouth(), NL_BOUNDS.south);
+                const west = Math.max(bounds.getWest(), NL_BOUNDS.west);
+                const north = Math.min(bounds.getNorth(), NL_BOUNDS.north);
+                const east = Math.min(bounds.getEast(), NL_BOUNDS.east);
+
+                // Stop if looking entirely outside the Netherlands
+                if (south > north || west > east) {
+                    markerLayer.clearLayers();
+                    return;
+                }
+
+                const query = `
+                    [out:json][timeout:15];
+                    (
+                      node["amenity"="charging_station"](${south},${west},${north},${east});
+                      way["amenity"="charging_station"](${south},${west},${north},${east});
+                    );
+                    out body center;
+                `;
+                
+                const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    
+                    markerLayer.clearLayers();
+
+                    if (data && data.elements) {
+                        data.elements.forEach(element => {
+                            const lat = element.lat || (element.center && element.center.lat);
+                            const lon = element.lon || (element.center && element.center.lon);
+                            
+                            if (lat && lon) {
+                                const tags = element.tags || {};
+                                const operator = tags.operator || "Unknown Operator";
+                                const capacity = tags.capacity || "Unknown";
+                                const kw = tags.kw || "";
+
+                                // Determine color based on charging speed (kW)
+                                let dotColor = "#3b82f6"; // Blue default
+                                if (kw) {
+                                    const power = parseFloat(kw);
+                                    if (power >= 100) dotColor = "#ef4444";     // Red: Ultra Fast
+                                    else if (power >= 22) dotColor = "#f97316"; // Orange: Fast
+                                    else dotColor = "#22c55e";                  // Green: Regular AC
+                                }
+
+                                const popupContent = `
+                                    <div style="font-size: 14px; line-height: 1.4; font-family: sans-serif;">
+                                        <strong>🏢 ${operator}</strong><br>
+                                        ⚡ Power: ${kw ? kw + ' kW' : 'Not specified'}<br>
+                                        🔌 Outlets: ${capacity}
+                                    </div>
+                                `;
+
+                                // FIXED: Using Circle Markers drawn directly via code (no external pin images required!)
+                                const marker = L.circleMarker([lat, lon], {
+                                    radius: 8,
+                                    fillColor: dotColor,
+                                    color: "#ffffff",
+                                    weight: 2,
+                                    opacity: 1,
+                                    fillOpacity: 0.9
+                                }).bindPopup(popupContent);
+
+                                markerLayer.addLayer(marker);
+                            }
+                        });
+                    }
+                } catch (error) {
+                    console.error("Error fetching charging stations:", error);
+                }
             }
-        }
 
-        function onMapChange() {
-            clearTimeout(debounceTimeout);
-            debounceTimeout = setTimeout(fetchChargingStations, 400);
-        }
-        map.on('moveend', onMapChange);
-        
-        // 4. GPS Geolocation Initialization
-        map.locate({ setView: true, maxZoom: 15 });
+            // Fire fetch when user drags or zooms
+            function onMapChange() {
+                clearTimeout(debounceTimeout);
+                debounceTimeout = setTimeout(fetchChargingStations, 400);
+            }
+            map.on('moveend', onMapChange);
+            
+            // 4. Handle Location
+            map.locate({ setView: true, maxZoom: 15 });
 
-        map.on('locationfound', (e) => {
-            L.circle(e.latlng, { radius: e.accuracy / 2, color: '#0078ff', weight: 2, fillOpacity: 0.15 }).addTo(map);
-        });
+            map.on('locationfound', (e) => {
+                L.circle(e.latlng, { radius: e.accuracy / 2, color: '#0078ff', weight: 2, fillOpacity: 0.15 }).addTo(map);
+            });
 
-        map.on('locationerror', () => {
-            // If PC blocks location sharing, fallback cleanly to run initial fetch on center coords
+            map.on('locationerror', () => {
+                fetchChargingStations(); // Fallback load if GPS denied
+            });
+
             fetchChargingStations();
-        });
 
-        // Trigger baseline fetch run immediately
-        fetchChargingStations();
-
-        // 5. Build Desktop & Mobile compatible Find Me Button
-        const LocateControl = L.Control.extend({
-            options: { position: 'topleft' },
-            onAdd: function() {
-                const btn = L.DomUtil.create('button', 'locate-btn');
-                btn.innerHTML = "📍 Find Me";
-                btn.onclick = function() {
-                    map.locate({ setView: true, maxZoom: 15 });
-                };
-                return btn;
-            }
+            // 5. Build Manual UI Location Control button
+            const LocateControl = L.Control.extend({
+                options: { position: 'topleft' },
+                onAdd: function() {
+                    const btn = L.DomUtil.create('button', 'locate-btn');
+                    btn.innerHTML = "📍 Find Me";
+                    btn.onclick = function() {
+                        map.locate({ setView: true, maxZoom: 15 });
+                    };
+                    return btn;
+                }
+            });
+            map.addControl(new LocateControl());
         });
-        map.addControl(new LocateControl());
     </script>
 </body>
 </html>
