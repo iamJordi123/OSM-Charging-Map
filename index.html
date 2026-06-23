@@ -27,15 +27,34 @@
             z-index: 1;
         }
         
-        .locate-btn {
-            background: white;
-            padding: 8px 12px;
-            border: 2px solid rgba(0,0,0,0.15);
-            border-radius: 6px;
+        /* Custom styled locate button matching Leaflet zoom controls precisely */
+        .leaflet-touch .locate-btn, .locate-btn {
+            background: #ffffff;
+            width: 30px;
+            height: 30px;
+            line-height: 30px;
+            border: none;
+            border-bottom: 1px solid #ccc;
+            border-radius: 0;
             cursor: pointer;
-            font-weight: bold;
-            font-size: 14px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            font-size: 18px;
+            color: #333;
+            text-align: center;
+            padding: 0;
+            display: block;
+            box-shadow: none;
+        }
+        
+        /* Match standard Leaflet control container rounding rules */
+        .leaflet-bar button:last-child {
+            border-bottom: none;
+            border-bottom-left-radius: 4px;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .locate-btn:hover {
+            background: #f4f4f4;
+            color: #000;
         }
 
         #version-tag {
@@ -57,13 +76,13 @@
 </head>
 <body>
 
-    <div id="version-tag">v1.1</div>
+    <div id="version-tag">v1.2</div>
     <div id="map"></div>
 
     <script>
         window.addEventListener('DOMContentLoaded', () => {
             
-            // 1. Setup Map Window (Centered on the Netherlands)
+            // 1. Setup Map Window (Centered on the Netherlands by default)
             const map = L.map('map', {
                 center: [52.1326, 5.2913],
                 zoom: 13,
@@ -78,6 +97,7 @@
 
             // Layer to hold charging dots
             let markerLayer = L.layerGroup().addTo(map);
+            let userLocationMarker = null;
             
             // Boundaries for the Netherlands
             const NL_BOUNDS = {
@@ -91,7 +111,6 @@
 
             // 3. Charging Station Data Engine
             async function fetchChargingStations() {
-                // Safe Check: Don't load anything if the map dimensions aren't fully processed yet
                 if (!map.getBounds()) return;
 
                 // Optimization: Don't fetch if user is zoomed out too far
@@ -106,13 +125,11 @@
                 const north = Math.min(bounds.getNorth(), NL_BOUNDS.north);
                 const east = Math.min(bounds.getEast(), NL_BOUNDS.east);
 
-                // Stop if looking entirely outside the Netherlands boundaries
                 if (south > north || west > east) {
                     markerLayer.clearLayers();
                     return;
                 }
 
-                // Optimized streamlined query string
                 const query = `[out:json][timeout:15];(node["amenity"="charging_station"](${south},${west},${north},${east});way["amenity"="charging_station"](${south},${west},${north},${east}););out center;`;
                 const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
@@ -133,7 +150,6 @@
                                 const capacity = tags.capacity || "Unknown";
                                 const kw = tags.kw || "";
 
-                                // Determine color based on charging speed (kW)
                                 let dotColor = "#3b82f6"; // Blue default
                                 if (kw) {
                                     const power = parseFloat(kw);
@@ -150,7 +166,6 @@
                                     </div>
                                 `;
 
-                                // Circle Markers rendered via CSS canvas code
                                 const marker = L.circleMarker([lat, lon], {
                                     radius: 7,
                                     fillColor: dotColor,
@@ -169,44 +184,48 @@
                 }
             }
 
-            // Fire fetch when user finishes dragging or zooming
             function onMapChange() {
                 clearTimeout(debounceTimeout);
                 debounceTimeout = setTimeout(fetchChargingStations, 300);
             }
             map.on('moveend', onMapChange);
             
-            // 4. Handle Location
-            map.locate({ setView: true, maxZoom: 15 });
-
+            // 4. Handle Location Triggers
             map.on('locationfound', (e) => {
-                L.circle(e.latlng, { radius: e.accuracy / 2, color: '#0078ff', weight: 2, fillOpacity: 0.15 }).addTo(map);
-                // Flying to location automatically triggers 'moveend' to load markers
+                // Clear old accuracy circles if they exist
+                if (userLocationMarker) {
+                    map.removeLayer(userLocationMarker);
+                }
+                userLocationMarker = L.circle(e.latlng, { radius: e.accuracy / 2, color: '#0078ff', weight: 2, fillOpacity: 0.15 }).addTo(map);
             });
 
             map.on('locationerror', () => {
-                // If browser location blocks it, fall back to center layout loading instantly
-                fetchChargingStations();
+                alert("Location access denied or unavailable.");
             });
 
-            // Fallback load safety run once map initializes view completely
+            // Initial baseline data pull right on center view loading completion
             map.whenReady(() => {
                 fetchChargingStations();
             });
 
-            // 5. Build Manual UI Location Control button
-            const LocateControl = L.Control.extend({
+            // 5. Inject Custom Location Button directly into Leaflet's zoom control container box
+            const CustomLocateControl = L.Control.extend({
                 options: { position: 'topleft' },
                 onAdd: function() {
-                    const btn = L.DomUtil.create('button', 'locate-btn');
-                    btn.innerHTML = "📍 Find Me";
-                    btn.onclick = function() {
+                    // Find or create standard control container
+                    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+                    const btn = L.DomUtil.create('button', 'locate-btn', container);
+                    btn.innerHTML = "⌖"; // Standard location crosshair symbol
+                    btn.title = "Find My Location";
+                    
+                    btn.onclick = function(e) {
+                        e.stopPropagation();
                         map.locate({ setView: true, maxZoom: 15 });
                     };
-                    return btn;
+                    return container;
                 }
             });
-            map.addControl(new LocateControl());
+            map.addControl(new CustomLocateControl());
         });
     </script>
 </body>
