@@ -75,7 +75,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v1.6</div>
+    <div id="version-tag">v1.7</div>
     <div id="map"></div>
 
     <script>
@@ -109,7 +109,7 @@
             const zoomNotice = document.getElementById('zoom-notice');
             let debounceTimeout;
 
-            // 1. FIXED DATA ENGINE FOR PC PRIVACY FILTERS
+            // NEW: Fixed Data Engine routing requests through the alternative French engine
             async function fetchChargingStations() {
                 if (!map.getBounds()) return;
 
@@ -129,20 +129,17 @@
                 const north = bounds.getNorth();
                 const east = bounds.getEast();
 
+                // Clean structured query targeting nodes and ways
                 const query = `[out:json][timeout:25];(node["amenity"="charging_station"](${south},${west},${north},${east});way["amenity"="charging_station"](${south},${west},${north},${east}););out center;`;
                 
-                // Using a completely secure, cross-origin safe endpoint target
-                const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+                // FIXED: Swapped endpoints to open-source backup node to bypass Zen restrictions
+                const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
+                url.searchParams.append('data', query);
 
                 try {
-                    // Inject basic client fetch properties to slip completely past Zen's tracking protection blocklist
-                    const response = await fetch(url, {
-                        method: "GET",
-                        mode: "cors", 
-                        credentials: "omit"
-                    });
-                    
+                    const response = await fetch(url.toString());
                     const data = await response.json();
+                    
                     markerLayer.clearLayers();
 
                     if (data && data.elements) {
@@ -186,7 +183,7 @@
                         });
                     }
                 } catch (error) {
-                    console.error("Data tracking blocked by browser engine:", error);
+                    console.error("Fetch intercepted or server busy:", error);
                 }
             }
 
