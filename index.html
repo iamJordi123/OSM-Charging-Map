@@ -1,48 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>OSM EV Charging Map</title>
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-    
-    <style>
-        /* Make the map fill the entire mobile screen */
-        body, html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            width: 100%;
-            font-family: Arial, sans-serif;
-        }
-        #map {
-            height: 100%;
-            width: 100%;
-        }
-        /* Style for the GPS locate button */
-        .locate-btn {
-            background: white;
-            padding: 10px;
-            border: 2px solid rgba(0,0,0,0.2);
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 14px;
-        }
-    </style>
-</head>
-<body>
-
-    <div id="map"></div>
-
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
-    <script>
-        // 1. Initialize the map centered on a default location (or zoomed out)
-        const map = L.map('map').setView([52.1326, 5.2913], 13); // Defaults to Netherlands, change as desired
+<script>
+        // 1. Initialize the map centered on the Netherlands
+        const map = L.map('map').setView([52.1326, 5.2913], 13); 
 
         // 2. Add OpenStreetMap background tiles
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -50,20 +8,43 @@
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        // Keep track of loaded markers so we don't duplicate them
+        // Layer group to manage charging station markers
         let markerLayer = L.layerGroup().addTo(map);
+        
+        // Define strict bounding box limits for the Netherlands
+        const NL_BOUNDS = {
+            south: 50.75,
+            west: 3.2,
+            north: 53.7,
+            east: 7.25
+        };
 
-        // 3. Function to fetch data from OpenStreetMap via Overpass API
+        let debounceTimeout;
+
+        // 3. Optimized function to fetch charging stations
         async function fetchChargingStations() {
-            const bounds = map.getBounds();
-            const south = bounds.getSouth();
-            const west = bounds.getWest();
-            const north = bounds.getNorth();
-            const east = bounds.getEast();
+            // OPTIMIZATION 1: Don't load data if zoomed out too far (saves data & prevents lag)
+            if (map.getZoom() < 12) {
+                markerLayer.clearLayers();
+                return;
+            }
 
-            // Overpass QL query looking for amenity=charging_station inside the map boundaries
+            const bounds = map.getBounds();
+            
+            // OPTIMIZATION 2: Restrict calculations to only the Netherlands boundaries
+            const south = Math.max(bounds.getSouth(), NL_BOUNDS.south);
+            const west = Math.max(bounds.getWest(), NL_BOUNDS.west);
+            const north = Math.min(bounds.getNorth(), NL_BOUNDS.north);
+            const east = Math.min(bounds.getEast(), NL_BOUNDS.east);
+
+            // If the visible map screen is entirely outside the Netherlands, don't query anything
+            if (south > north || west > east) {
+                markerLayer.clearLayers();
+                return;
+            }
+
             const query = `
-                [out:json][timeout:25];
+                [out:json][timeout:15];
                 (
                   node["amenity"="charging_station"](${south},${west},${north},${east});
                   way["amenity"="charging_station"](${south},${west},${north},${east});
@@ -77,11 +58,9 @@
                 const response = await fetch(url);
                 const data = await response.json();
                 
-                // Clear old markers before drawing new ones
                 markerLayer.clearLayers();
 
                 data.elements.forEach(element => {
-                    // Use center coordinates if it's a way/polygon, otherwise use lat/lon
                     const lat = element.lat || (element.center && element.center.lat);
                     const lon = element.lon || (element.center && element.center.lon);
                     
@@ -91,23 +70,20 @@
                         const capacity = tags.capacity || "Unknown";
                         const kw = tags.kw || "";
 
-                        // Basic coloring rule based on kW capacity (if available)
                         let markerColor = "blue"; 
                         if (kw) {
                             const power = parseFloat(kw);
-                            if (power >= 50) markerColor = "red";       // Ultra Fast
-                            else if (power >= 22) markerColor = "orange"; // Fast
-                            else markerColor = "green";                  // Slow/Standard
+                            if (power >= 50) markerColor = "red";       
+                            else if (power >= 22) markerColor = "orange"; 
+                            else markerColor = "green";                  
                         }
 
-                        // Create a simple popup showing data
                         const popupContent = `
                             <strong>${operator}</strong><br>
                             ⚡ Power: ${kw ? kw + ' kW' : 'Not specified'}<br>
                             🔌 Outlets: ${capacity}
                         `;
 
-                        // For now, using standard markers (we can upgrade to custom icons next!)
                         const marker = L.marker([lat, lon]).bindPopup(popupContent);
                         markerLayer.addLayer(marker);
                     }
@@ -117,13 +93,18 @@
             }
         }
 
-        // 4. Trigger data fetch whenever the user finishes moving or zooming the map
-        map.on('moveend', fetchChargingStations);
+        // OPTIMIZATION 3: Debounce map movements (wait 400ms after user stops moving before updating)
+        function onMapChange() {
+            clearTimeout(debounceTimeout);
+            debounceTimeout = setTimeout(fetchChargingStations, 400);
+        }
+
+        map.on('moveend', onMapChange);
         
-        // Run once on initial load
+        // Initial load
         fetchChargingStations();
 
-        // 5. Add a "Locate Me" button control for mobile phones
+        // 4. Mobile GPS Locate Control
         const LocateControl = L.Control.extend({
             options: { position: 'topleft' },
             onAdd: function() {
@@ -137,7 +118,6 @@
         });
         map.addControl(new LocateControl());
 
-        // Handle GPS location tracking errors/success
         map.on('locationfound', (e) => {
             L.circle(e.latlng, e.accuracy / 2).addTo(map);
         });
@@ -145,5 +125,3 @@
             alert("Could not access your location. Please check your GPS permissions.");
         });
     </script>
-</body>
-</html>
