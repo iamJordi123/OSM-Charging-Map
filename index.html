@@ -75,7 +75,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v2.3</div>
+    <div id="version-tag">v2.4</div>
     <div id="map"></div>
 
     <script>
@@ -118,7 +118,6 @@
 
                 const currentZoom = map.getZoom();
 
-                // Base restriction check: Don't load anything if zoomed too far out
                 if (currentZoom < 13) {
                     markerLayer.clearLayers();
                     zoomNotice.style.display = 'block';
@@ -133,14 +132,13 @@
                 const north = bounds.getNorth();
                 const east = bounds.getEast();
 
-                // FIXED: Dynamic capacity filtering based on your current zoom depth
-                let capacityFilter = '';
+                let overpassBlock = 'node["amenity"="charging_station"]({bounds}); way["amenity"="charging_station"]({bounds});';
                 if (currentZoom === 13 || currentZoom === 14) {
-                    // Only request stations that explicitly have a capacity of 3 or more nodes
-                    capacityFilter = '["capacity"!~"^(1|2)$"]';
+                    overpassBlock = 'node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2);';
                 }
 
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2.3\n(node["amenity"="charging_station"]${capacityFilter}(${south},${west},${north},${east});way["amenity"="charging_station"]${capacityFilter}(${south},${west},${north},${east}););out center;`;
+                const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2.4\n(${finalBlock});out center;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -163,9 +161,47 @@
                                 const operator = tags.operator || tags.brand || "Unknown Operator";
                                 const capacityRaw = tags.capacity || "1"; 
 
-                                // FIXED: Multi-layered fallback tracker to reliably grab charger power ratings
-                                const kwRaw = tags["socket:electricity:power"] || tags.maxpower || tags.kw || tags.power || "";
-                                
+                                // 1. SCAN DETAILED PLUG SOCKET TAGS
+                                const socketProfiles = [];
+                                let maxDetectedKw = 0;
+
+                                // Common OpenStreetMap Socket Identifier Mappings
+                                const targetPlugs = [
+                                    { key: 'type2_combo', label: 'CCS' },
+                                    { key: 'type2', label: 'Type 2' },
+                                    { key: 'chademo', label: 'CHAdeMO' },
+                                    { key: 'tesla_supercharger', label: 'Tesla Supercharger' },
+                                    { key: 'tesla_destination', label: 'Tesla Dest.' },
+                                    { key: 'schuko', label: 'Schuko' }
+                                ];
+
+                                targetPlugs.forEach(plug => {
+                                    const outputValue = tags[`socket:${plug.key}:output`];
+                                    const countValue = tags[`socket:${plug.key}`];
+                                    
+                                    if (outputValue || countValue) {
+                                        let kwNum = parseFloat(outputValue);
+                                        if (!isNaN(kwNum) && kwNum > maxDetectedKw) {
+                                            maxDetectedKw = kwNum;
+                                        }
+                                        
+                                        // Formulate clear readable socket line label
+                                        let line = `• 🔌 ${plug.label}`;
+                                        if (countValue && countValue !== 'yes') line += ` (x${countValue})`;
+                                        if (outputValue) {
+                                            const formattedOutput = isNaN(kwNum) ? outputValue : `${kwNum} kW`;
+                                            line += `: <strong>${formattedOutput}</strong>`;
+                                        }
+                                        socketProfiles.push(line);
+                                    }
+                                });
+
+                                // Fallback mapping system to grab high level power parameters if specific socket details are empty
+                                const fallbackKw = tags.maxpower || tags.kw || tags.power || "";
+                                if (maxDetectedKw === 0 && fallbackKw) {
+                                    maxDetectedKw = parseFloat(fallbackKw) || 0;
+                                }
+
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
                                 let dotRadius = 6; 
@@ -177,35 +213,57 @@
 
                                 let dotColor = "#3b82f6"; 
                                 let borderColor = "#ffffff"; 
+                                let customWeight = 1.5;
                                 const lowerOp = operator.toLowerCase();
 
                                 if (lowerOp.includes("tesla")) {
                                     dotColor = "#e82127";  
                                 } else if (lowerOp.includes("fastned")) {
                                     dotColor = "#ffc700";  
+                                    borderColor = "#222222"; 
+                                    customWeight = 2;
                                 } else if (lowerOp.includes("shell")) {
                                     dotColor = "#f7d117";  
                                     borderColor = "#003aa6"; 
-                                } else if (kwRaw) {
-                                    const power = parseFloat(kwRaw);
-                                    if (power >= 100) dotColor = "#ef4444";     
-                                    else if (power >= 22) dotColor = "#f97316"; 
+                                    customWeight = 2;
+                                } else if (lowerOp.includes("allego")) {
+                                    dotColor = "#004b49";  
+                                    borderColor = "#00ffcc"; 
+                                    customWeight = 2;
+                                } else if (lowerOp.includes("eneco")) {
+                                    dotColor = "#00b050";  
+                                } else if (lowerOp.includes("vattenfall") || lowerOp.includes("incharge")) {
+                                    dotColor = "#00a3e0";  
+                                    borderColor = "#0b2240"; 
+                                    customWeight = 2;
+                                } else if (lowerOp.includes("total")) {
+                                    dotColor = "#ea4335";  
+                                } else if (lowerOp.includes("e-flux") || lowerOp.includes("eflux")) {
+                                    dotColor = "#e6007e";  
+                                } else if (lowerOp.includes("ionity")) {
+                                    dotColor = "#111111";  
+                                    borderColor = "#ffffff";
+                                    customWeight = 2;
+                                } else if (maxDetectedKw > 0) {
+                                    if (maxDetectedKw >= 100) dotColor = "#ef4444";     
+                                    else if (maxDetectedKw >= 22) dotColor = "#f97316"; 
                                     else dotColor = "#22c55e";                  
                                 }
 
-                                // Format power display nicely
-                                let powerDisplay = "Not specified";
-                                if (kwRaw) {
-                                    // Strip any clean trailing string units (like 'kW') if already added by mapper
-                                    const powerNum = parseFloat(kwRaw);
-                                    powerDisplay = isNaN(powerNum) ? kwRaw : `${powerNum} kW`;
+                                // 2. RENDER THE PLUG DATA STRUCTURE
+                                let socketsHtml = "Not specified";
+                                if (socketProfiles.length > 0) {
+                                    socketsHtml = "<div style='margin-top: 4px; padding-left: 2px;'>" + socketProfiles.join("<br>") + "</div>";
+                                } else if (fallbackKw) {
+                                    const fallbackNum = parseFloat(fallbackKw);
+                                    socketsHtml = isNaN(fallbackNum) ? fallbackKw : `${fallbackNum} kW`;
                                 }
 
                                 const popupContent = `
-                                    <div style="font-size: 14px; line-height: 1.4; font-family: sans-serif; min-width: 150px;">
+                                    <div style="font-size: 14px; line-height: 1.4; font-family: sans-serif; min-width: 175px;">
                                         <strong>🏢 ${operator}</strong><br>
-                                        ⚡ Power: ${powerDisplay}<br>
-                                        🔌 Outlets: ${capacityRaw}
+                                        ⚡ Power Output:<br>${socketsHtml}<br>
+                                        🔢 Total Outlets: ${capacityRaw}
                                     </div>
                                 `;
 
@@ -213,7 +271,7 @@
                                     radius: dotRadius,
                                     fillColor: dotColor,
                                     color: borderColor,
-                                    weight: borderColor === "#ffffff" ? 1.5 : 2, 
+                                    weight: customWeight, 
                                     opacity: 1,
                                     fillOpacity: 0.85
                                 }).bindPopup(popupContent);
