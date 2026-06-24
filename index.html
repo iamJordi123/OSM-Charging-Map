@@ -241,7 +241,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v4.0</div>
+    <div id="version-tag">v4.1</div>
     <div id="map"></div>
 
     <!-- Right Side Dashboard Element Container -->
@@ -312,9 +312,8 @@
             directoryControl.addTo(map);
 
             let markerLayer = L.layerGroup().addTo(map);
-            let areaHighlightLayer = L.layerGroup().addTo(map); // Footprint Highlighting Layer
+            let areaHighlightLayer = L.layerGroup().addTo(map); 
             let userLocationMarker = null;
-            let activeSelectedMarker = null;
 
             const zoomNotice = document.getElementById('zoom-notice');
             const detailPanel = document.getElementById('detail-panel');
@@ -323,17 +322,16 @@
             let debounceTimeout;
             let currentSelectedId = null;
 
-            // UI Actions
             panelCloseBtn.addEventListener('click', clearActiveSelection);
 
             function clearActiveSelection() {
                 detailPanel.style.display = 'none';
                 areaHighlightLayer.clearLayers();
-                if (activeSelectedMarker && activeSelectedMarker._icon) {
-                    activeSelectedMarker._icon.classList.remove('selected-pin-active');
-                }
-                activeSelectedMarker = null;
                 currentSelectedId = null;
+                // Remove highlight classes from any visible marker
+                markerLayer.eachLayer(marker => {
+                    if (marker._icon) marker._icon.classList.remove('selected-pin-active');
+                });
             }
 
             async function fetchChargingStations() {
@@ -361,8 +359,7 @@
                 }
 
                 const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
-                // UPGRADED TO GEOM OUT TO MAP CHARGING POLYS
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v4.0\n(${finalBlock});out geom;`;
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v4.1\n(${finalBlock});out geom;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -372,9 +369,6 @@
                     const data = await response.json();
                     
                     markerLayer.clearLayers();
-
-                    // Re-draw selected geometry layer context if panning refreshes viewport data arrays
-                    let retainedMarkerRef = null;
 
                     if (data && data.elements) {
                         data.elements.forEach(element => {
@@ -390,8 +384,8 @@
                             
                             if (lat && lon) {
                                 const tags = element.tags || {};
-                                const rawOperator = tags.operator || tags.brand || "";
-                                const operator = rawOperator || "Unknown Operator";
+                                // FIX: Check both brand and operator properties comprehensively
+                                const operator = tags.operator || tags.brand || "";
                                 const capacityRaw = tags.capacity || "1"; 
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
@@ -434,7 +428,7 @@
                                 const lowerOp = operator.toLowerCase();
                                 let coreColor = "#94a3b8"; 
                                 
-                                if (rawOperator !== "") {
+                                if (operator !== "") {
                                     coreColor = "#22c55e"; 
                                     if (lowerOp.includes("fastned")) coreColor = "#ffc700"; 
                                     else if (lowerOp.includes("shell")) coreColor = "#f7d117"; 
@@ -472,30 +466,27 @@
                                     });
                                 }
 
+                                const displayName = operator || "Unknown Operator";
                                 const marker = L.marker([lat, lon], { icon: customMarkerIcon });
                                 
-                                // NEW PANEL INTERACTION HOOK INSTEAD OF POPUP BOUNDS
                                 marker.on('click', (e) => {
                                     L.DomEvent.stopPropagation(e);
                                     
-                                    // Reset structural classes
-                                    if (activeSelectedMarker && activeSelectedMarker._icon) {
-                                        activeSelectedMarker._icon.classList.remove('selected-pin-active');
-                                    }
+                                    // Strip selection class from all layers first
+                                    markerLayer.eachLayer(m => {
+                                        if (m._icon) m._icon.classList.remove('selected-pin-active');
+                                    });
                                     
-                                    activeSelectedMarker = marker;
                                     currentSelectedId = element.id;
-                                    
                                     if (marker._icon) {
                                         marker._icon.classList.add('selected-pin-active');
                                     }
 
-                                    // Build Dashboard Data Text Structures
-                                    document.getElementById('panel-station-title').innerText = operator;
+                                    document.getElementById('panel-station-title').innerText = displayName;
                                     
                                     let socketsHtml = "Not specified";
                                     if (socketProfiles.length > 0) {
-                                        socketsHtml = "<div style='margin-top: 4px;'>" + socketProfiles.join("<br>") + "</div>";
+                                        socketsHtml = "<div style='margin-top: 4px;'> " + socketProfiles.join("<br>") + "</div>";
                                     } else if (fallbackKw) {
                                         const fallbackNum = parseFloat(fallbackKw);
                                         socketsHtml = isNaN(fallbackNum) ? fallbackKw : `⚡ Standard Hub: <strong>${fallbackNum} kW</strong>`;
@@ -505,7 +496,6 @@
 
                                     detailPanel.style.display = 'block';
 
-                                    // AREA HIGHLIGHT ENGINE FOR FOOTPRINTS IN OSM
                                     areaHighlightLayer.clearLayers();
                                     if (element.type === 'way' && element.geometry) {
                                         const latLngs = element.geometry.map(pt => [pt.lat, pt.lon]);
@@ -523,21 +513,15 @@
 
                                 markerLayer.addLayer(marker);
 
+                                // FIX: Apply selection logic safely during paint loops if this marker matches the selected ID
                                 if (currentSelectedId && element.id === currentSelectedId) {
-                                    retainedMarkerRef = marker;
+                                    setTimeout(() => {
+                                        if (marker._icon) marker._icon.classList.add('selected-pin-active');
+                                    }, 10);
                                 }
                             }
                         });
                     }
-
-                    // Reinstate state modifiers across debounce paint steps
-                    if (retainedMarkerRef) {
-                        activeSelectedMarker = retainedMarkerRef;
-                        if (activeSelectedMarker._icon) {
-                            activeSelectedMarker._icon.classList.add('selected-pin-active');
-                        }
-                    }
-
                 } catch (error) {
                     console.error("Fetch exception details:", error);
                 }
@@ -571,7 +555,6 @@
                 locateBtn.title = "Find My Location";
                 locateBtn.role = "button";
                 
-                // Pure Inline SVG Crosshair matching native font thickness properties
                 locateBtn.innerHTML = `
                     <svg width="15" height="15" viewBox="0 0 16 16">
                         <circle cx="8" cy="8" r="3.5"></circle>
