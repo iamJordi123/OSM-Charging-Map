@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>OSM EV Charging Map</title>
     
-    <!-- Core Leaflet CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
     
     <style>
@@ -70,6 +69,66 @@
             border: 1px solid #e2e8f0;
         }
 
+        /* Station Directory Dashboard Style */
+        .map-directory-panel {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 12px 14px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            font-size: 12px;
+            color: #1e293b;
+            max-width: 200px;
+            line-height: 1.4;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .map-directory-panel h4 {
+            margin: 0 0 6px 0;
+            font-size: 13px;
+            font-weight: 700;
+            color: #0f172a;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 4px;
+        }
+
+        .map-directory-panel h5 {
+            margin: 8px 0 4px 0;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+        }
+
+        .directory-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        /* Simulated Map Pin Core Indicator */
+        .dir-core {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            display: inline-block;
+            flex-shrink: 0;
+            border: 1px solid rgba(0,0,0,0.15);
+        }
+
+        /* Simulated Map Pin Edge Ring Indicator */
+        .dir-ring {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            display: inline-block;
+            flex-shrink: 0;
+            background: #fff;
+            border-width: 2.5px;
+            border-style: solid;
+        }
+
         /* ABRP Style Premium Floating Badges */
         .abrp-badge {
             display: flex;
@@ -94,13 +153,12 @@
         }
     </style>
 
-    <!-- Core Leaflet JS Engine -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 </head>
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v3.1</div>
+    <div id="version-tag">v3.2</div>
     <div id="map"></div>
 
     <script>
@@ -129,6 +187,33 @@
                 maxZoom: 19,
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors | Data via <a href="https://wiki.openstreetmap.org/wiki/Overpass_API" target="_blank">Overpass API</a>'
             }).addTo(map);
+
+            // CREATE AND INJECT THE DIRECTORY CONTROL
+            const directoryControl = L.control({ position: 'bottomright' });
+            directoryControl.onAdd = function() {
+                const div = L.DomUtil.create('div', 'map-directory-panel');
+                div.innerHTML = `
+                    <h4>Station Directory</h4>
+                    
+                    <h5>Network Brands</h5>
+                    <div class="directory-row"><span class="dir-core" style="background:#e82127;"></span>Tesla (Exclusive Red)</div>
+                    <div class="directory-row"><span class="dir-core" style="background:#ffc700;"></span>Fastned</div>
+                    <div class="directory-row"><span class="dir-core" style="background:#f7d117;"></span>Shell Recharge</div>
+                    <div class="directory-row"><span class="dir-core" style="background:#004b49;"></span>Allego</div>
+                    <div class="directory-row"><span class="dir-core" style="background:#22c55e;"></span>Other Networks</div>
+                    <div class="directory-row"><span class="dir-core" style="background:#111111;"></span>Ionity</div>
+                    <div class="directory-row"><span class="dir-core" style="background:#94a3b8;"></span>Unnamed / Independent</div>
+
+                    <h5>Station Capacity</h5>
+                    <div class="directory-row"><span class="dir-ring" style="border-color:#ef4444;"></span>1-2 Outlets</div>
+                    <div class="directory-row"><span class="dir-ring" style="border-color:#f97316;"></span>3-4 Outlets</div>
+                    <div class="directory-row"><span class="dir-ring" style="border-color:#22c55e;"></span>5-9 Outlets</div>
+                    <div class="directory-row"><span class="dir-ring" style="border-color:#3b82f6;"></span>10-19 Outlets</div>
+                    <div class="directory-row"><span class="dir-ring" style="border-color:#a855f7;"></span>20+ Outlets</div>
+                `;
+                return div;
+            };
+            directoryControl.addTo(map);
 
             let markerLayer = L.layerGroup().addTo(map);
             let userLocationMarker = null;
@@ -164,7 +249,7 @@
                 }
 
                 const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v3.1\n(${finalBlock});out center;`;
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v3.2\n(${finalBlock});out center;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -184,7 +269,8 @@
                             
                             if (lat && lon) {
                                 const tags = element.tags || {};
-                                const operator = tags.operator || tags.brand || "Unknown Operator";
+                                const rawOperator = tags.operator || tags.brand || "";
+                                const operator = rawOperator || "Unknown Operator";
                                 const capacityRaw = tags.capacity || "1"; 
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
@@ -227,19 +313,26 @@
 
                                 const lowerOp = operator.toLowerCase();
 
-                                // ACCURATE NETWORK COLOR ENGINE (Prioritizes Major Brands without conflicts)
-                                let coreColor = "#22c55e"; // Neutral Default (Green)
-                                if (lowerOp.includes("fastned")) {
-                                    coreColor = "#ffc700"; // Sunny Brand Yellow
-                                } else if (lowerOp.includes("shell")) {
-                                    coreColor = "#f7d117"; // Shell Core Gold
-                                } else if (lowerOp.includes("allego")) {
-                                    coreColor = "#004b49"; // Corporate Deep Teal
-                                } else if (lowerOp.includes("ionity")) {
-                                    coreColor = "#111111"; // Charcoal Premium Dark
+                                // Systematic Corporate Color Allocator
+                                let coreColor = "#94a3b8"; // Default Grey
+                                
+                                if (rawOperator !== "") {
+                                    coreColor = "#22c55e"; // Default Network Green
+
+                                    if (lowerOp.includes("fastned")) {
+                                        coreColor = "#ffc700"; 
+                                    } else if (lowerOp.includes("shell")) {
+                                        coreColor = "#f7d117"; 
+                                    } else if (lowerOp.includes("allego")) {
+                                        coreColor = "#004b49"; 
+                                    } else if (lowerOp.includes("ionity")) {
+                                        coreColor = "#111111"; 
+                                    } else if (lowerOp.includes("eneco") || lowerOp.includes("totalenergies")) {
+                                        coreColor = "#22c55e"; 
+                                    }
                                 }
 
-                                // Outer Ring Capacity Colors (Red, Orange, Green, Blue, Purple)
+                                // Outer Ring Capacity Colors
                                 let ringColor = "#ef4444"; 
                                 if (capacity >= 3 && capacity < 5) ringColor = "#f97316"; 
                                 else if (capacity >= 5 && capacity < 10) ringColor = "#22c55e"; 
@@ -249,7 +342,7 @@
                                 let innerHtmlContent = null;
 
                                 if (lowerOp.includes("tesla")) {
-                                    coreColor = "#e82127"; // Tesla owns pure Red exclusively
+                                    coreColor = "#e82127"; // Tesla Pure Red
                                     innerHtmlContent = `
                                         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                             <path d="M12,21.3C12,21.3 12.3,10.6 12.3,9.5C12.3,8.4 14.2,7.3 15.3,7L15.3,6.2C13.4,6.4 12,7 12,7C12,7 10.6,6.4 8.7,6.2L8.7,7C9.8,7.3 11.7,8.4 11.7,9.5C11.7,10.6 12,21.3 12,21.3M4.6,5L4.8,4.2C7,3.3 9.4,2.9 12,2.9C14.6,2.9 17,3.3 19.2,4.2L19.4,5C17.1,4.2 14.6,3.8 12,3.8C9.4,3.8 6.9,4.2 4.6,5Z"/>
