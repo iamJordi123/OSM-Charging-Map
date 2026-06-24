@@ -27,7 +27,7 @@
             z-index: 1;
         }
 
-        /* Fixed Custom Location Button to match image_ea8c1c.png */
+        /* Fixed Custom Location Button to match native leaflet bar sizing exactly */
         .leaflet-bar a.leaflet-control-locate {
             display: flex;
             align-items: center;
@@ -144,11 +144,15 @@
             margin-bottom: 2px;
         }
 
-        /* Active Pin Selection Treatment with explicit scale reset fallback protection */
+        /* FIXED: Selection rule scales the INNER marker components without destroying Leaflet's spatial positioning engine */
         .selected-pin-active {
-            transform: scale(1.35) translate3d(0,0,0) !important;
-            filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.85)) !important;
             z-index: 99999 !important;
+        }
+        .selected-pin-active .abrp-badge,
+        .selected-pin-active .abrp-dot {
+            transform: scale(1.4) !important;
+            box-shadow: 0 0 14px rgba(59, 130, 246, 0.9) !important;
+            border-color: #3b82f6 !important;
         }
 
         /* Station Directory Panel Container */
@@ -217,6 +221,7 @@
             border-radius: 50%; 
             box-shadow: 0 3px 8px rgba(0,0,0,0.35);
             box-sizing: border-box;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         
         .abrp-badge svg {
@@ -229,6 +234,7 @@
             border-radius: 50%;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3);
             box-sizing: border-box;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
     </style>
 
@@ -237,7 +243,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v4.2</div>
+    <div id="version-tag">v4.3</div>
     <div id="map"></div>
 
     <div id="detail-panel">
@@ -350,14 +356,14 @@
                 const north = bounds.getNorth();
                 const east = bounds.getEast();
 
-                // Robust node and way matching fallback rules
-                let overpassBlock = 'node["amenity"="charging_station"]({bounds}); way["amenity"="charging_station"]({bounds}); node["brand"~"Tesla",i]({bounds});';
+                // FIXED: Query now explicitly gathers both Tesla structural area shapes (ways) and point components
+                let overpassBlock = 'node["amenity"="charging_station"]({bounds}); way["amenity"="charging_station"]({bounds}); node["brand"~"Tesla",i]({bounds}); way["brand"~"Tesla",i]({bounds});';
                 if (currentZoom === 12 || currentZoom === 13) {
-                    overpassBlock = 'node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); node["brand"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2);';
+                    overpassBlock = 'node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); node["brand"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2); way["brand"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2);';
                 }
 
                 const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v4.2\n(${finalBlock});out geom;`;
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v4.3\n(${finalBlock});out geom;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -382,7 +388,8 @@
                             
                             if (lat && lon) {
                                 const tags = element.tags || {};
-                                const operator = tags.operator || tags.brand || "";
+                                // FIXED: Broadened brand fallback sequence to include names for mis-tagged Tesla hardware hubs
+                                const operator = tags.operator || tags.brand || tags.name || "";
                                 const capacityRaw = tags.capacity || "1"; 
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
@@ -463,11 +470,10 @@
                                     });
                                 }
 
-                                const displayName = operator || "Unknown Operator";
+                                const displayName = tags.operator || tags.brand || tags.name || "Unknown Operator";
                                 const marker = L.marker([lat, lon], { icon: customMarkerIcon });
                                 
                                 marker.on('click', (e) => {
-                                    // CRITICAL: Stop propagation completely so it doesn't fire map.on('click')
                                     L.DomEvent.stopPropagation(e);
                                     
                                     markerLayer.eachLayer(m => {
@@ -510,7 +516,7 @@
 
                                 markerLayer.addLayer(marker);
 
-                                // Restore selection class if view repaints during active focus
+                                // Safely re-attach state visual modifiers if data repaints while selected
                                 if (currentSelectedId && element.id === currentSelectedId) {
                                     setTimeout(() => {
                                         if (marker._icon) marker._icon.classList.add('selected-pin-active');
@@ -536,7 +542,6 @@
             
             map.on('moveend', onMapChange);
             
-            // Map background tap clears sidebar safely
             map.on('click', () => {
                 clearActiveSelection();
             });
@@ -548,7 +553,6 @@
 
             map.whenReady(fetchChargingStations);
 
-            // CUSTOM RENDER FOR LOCATION CONTROL (Matches image_ea8c1c.png perfectly)
             const zoomControlContainer = document.querySelector('.leaflet-control-zoom');
             if (zoomControlContainer) {
                 const locateBtn = L.DomUtil.create('a', 'leaflet-control-locate', zoomControlContainer);
