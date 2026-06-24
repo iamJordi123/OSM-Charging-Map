@@ -75,22 +75,21 @@
             align-items: center;
             justify-content: center;
             border-radius: 50%; 
-            border: 2px solid #ffffff;
             box-shadow: 0 3px 8px rgba(0,0,0,0.35);
             transition: transform 0.1s ease;
+            box-sizing: border-box;
         }
         
-        /* Ensures any inline SVG we put inside the badge fits perfectly */
         .abrp-badge svg {
             width: 65%;
             height: 65%;
-            fill: #ffffff; /* Forces the SVG path to be pure white */
+            fill: #ffffff; 
         }
 
         .abrp-dot {
             border-radius: 50%;
-            border: 2px solid #ffffff;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            box-sizing: border-box;
         }
     </style>
 
@@ -99,7 +98,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v2.7</div>
+    <div id="version-tag">v3.0</div>
     <div id="map"></div>
 
     <script>
@@ -142,7 +141,7 @@
 
                 const currentZoom = map.getZoom();
 
-                if (currentZoom < 13) {
+                if (currentZoom < 12) {
                     markerLayer.clearLayers();
                     zoomNotice.style.display = 'block';
                     return;
@@ -157,12 +156,14 @@
                 const east = bounds.getEast();
 
                 let overpassBlock = 'node["amenity"="charging_station"]({bounds}); way["amenity"="charging_station"]({bounds});';
-                if (currentZoom === 13 || currentZoom === 14) {
+                
+                // ADJUSTED LOOKUP THRESHOLD: Smaller stations reveal themselves 1 zoom tier earlier (Level 14)
+                if (currentZoom === 12 || currentZoom === 13) {
                     overpassBlock = 'node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2);';
                 }
 
                 const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v2.7\n(${finalBlock});out center;`;
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v3.0\n(${finalBlock});out center;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -184,17 +185,10 @@
                                 const tags = element.tags || {};
                                 const operator = tags.operator || tags.brand || "Unknown Operator";
                                 const capacityRaw = tags.capacity || "1"; 
-
-                                const kwRaw = tags["socket:electricity:power"] || tags.maxpower || tags.kw || tags.power || "";
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
-                                // Dynamic Step Sizers based on outlet count
-                                let badgeW = 16, badgeH = 16;
-                                if (capacity === 2) { badgeW = 18; badgeH = 18; }
-                                else if (capacity >= 3 && capacity < 5) { badgeW = 22; badgeH = 22; }
-                                else if (capacity >= 5 && capacity < 10) { badgeW = 26; badgeH = 26; }
-                                else if (capacity >= 10 && capacity < 20) { badgeW = 32; badgeH = 32; }
-                                else if (capacity >= 20) { badgeW = 38; badgeH = 38; }
+                                // NEW: Force clean, unified icon sizes for all pins
+                                const badgeW = 26, badgeH = 26;
 
                                 const socketProfiles = [];
                                 let maxDetectedKw = 0;
@@ -231,19 +225,23 @@
                                     maxDetectedKw = parseFloat(fallbackKw) || 0;
                                 }
 
-                                // Base color logic based on speed
-                                let speedColor = "#22c55e"; // Regular AC
-                                if (maxDetectedKw >= 100) speedColor = "#ef4444"; // Ultra fast DC
-                                else if (maxDetectedKw >= 22) speedColor = "#f97316"; // Fast DC
+                                // Inside Badge Core Color mapping (Speed base)
+                                let speedColor = "#22c55e"; 
+                                if (maxDetectedKw >= 100) speedColor = "#ef4444"; 
+                                else if (maxDetectedKw >= 22) speedColor = "#f97316"; 
+
+                                // NEW: Outer Ring Border Color assignment via capacity brackets
+                                let ringColor = "#ef4444"; // 1-2: Red
+                                if (capacity >= 3 && capacity < 5) ringColor = "#f97316"; // 3-4: Orange
+                                else if (capacity >= 5 && capacity < 10) ringColor = "#22c55e"; // 5-9: Green
+                                else if (capacity >= 10 && capacity < 20) ringColor = "#3b82f6"; // 10-19: Blue
+                                else if (capacity >= 20) ringColor = "#a855f7"; // 20+: Purple
 
                                 let innerHtmlContent = null;
                                 const lowerOp = operator.toLowerCase();
 
-                                // THE BULLETPROOF INLINE SVG ENGINE
                                 if (lowerOp.includes("tesla")) {
-                                    speedColor = "#e82127"; // Tesla Red
-                                    // This is the mathematical path that draws the Tesla T. 
-                                    // It cannot break unless the user deletes the code.
+                                    speedColor = "#e82127"; 
                                     innerHtmlContent = `
                                         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                             <path d="M12,21.3C12,21.3 12.3,10.6 12.3,9.5C12.3,8.4 14.2,7.3 15.3,7L15.3,6.2C13.4,6.4 12,7 12,7C12,7 10.6,6.4 8.7,6.2L8.7,7C9.8,7.3 11.7,8.4 11.7,9.5C11.7,10.6 12,21.3 12,21.3M4.6,5L4.8,4.2C7,3.3 9.4,2.9 12,2.9C14.6,2.9 17,3.3 19.2,4.2L19.4,5C17.1,4.2 14.6,3.8 12,3.8C9.4,3.8 6.9,4.2 4.6,5Z"/>
@@ -253,21 +251,19 @@
 
                                 let customMarkerIcon;
 
-                                // If we have an inline SVG graphic (Tesla), render the full badge
                                 if (innerHtmlContent) {
                                     customMarkerIcon = L.divIcon({
-                                        html: `<div class="abrp-badge" style="width:${badgeW}px; height:${badgeH}px; background-color:${speedColor};">${innerHtmlContent}</div>`,
+                                        html: `<div class="abrp-badge" style="width:${badgeW}px; height:${badgeH}px; background-color:${speedColor}; border: 3px solid ${ringColor};">${innerHtmlContent}</div>`,
                                         className: '',
                                         iconSize: [badgeW, badgeH],
                                         iconAnchor: [badgeW/2, badgeH/2]
                                     });
                                 } else {
-                                    // Standard speed-color circles for everyone else
                                     customMarkerIcon = L.divIcon({
-                                        html: `<div class="abrp-dot" style="width:${badgeW - 4}px; height:${badgeH - 4}px; background-color:${speedColor};"></div>`,
+                                        html: `<div class="abrp-dot" style="width:${badgeW}px; height:${badgeH}px; background-color:${speedColor}; border: 4px solid ${ringColor};"></div>`,
                                         className: '',
-                                        iconSize: [badgeW - 4, badgeH - 4],
-                                        iconAnchor: [(badgeW - 4)/2, (badgeH - 4)/2]
+                                        iconSize: [badgeW, badgeH],
+                                        iconAnchor: [badgeW/2, badgeH/2]
                                     });
                                 }
 
