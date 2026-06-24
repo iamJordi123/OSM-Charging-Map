@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>OSM EV Charging Map</title>
     
+    <!-- Core Leaflet CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
     
     <style>
@@ -27,14 +28,18 @@
             z-index: 1;
         }
 
+        /* Fixed Custom Location Button to match image_ea8c1c.png */
         .leaflet-bar a.leaflet-control-locate {
-            font-size: 20px;
-            font-weight: bold;
-            color: #333;
-            cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
+            cursor: pointer;
+        }
+        .leaflet-bar a.leaflet-control-locate svg {
+            fill: none;
+            stroke: #2c3e50;
+            stroke-width: 2px;
+            stroke-linecap: round;
         }
 
         #version-tag {
@@ -69,7 +74,85 @@
             border: 1px solid #e2e8f0;
         }
 
-        /* Station Directory Dashboard Style */
+        /* Top Right Info Side Panel Dashboard */
+        #detail-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1001;
+            background: rgba(255, 255, 255, 0.98);
+            width: 280px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            border: 1px solid #e2e8f0;
+            padding: 16px;
+            display: none;
+            transition: all 0.25s ease;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+            border-bottom: 2px solid #f1f5f9;
+            padding-bottom: 8px;
+        }
+
+        .panel-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            margin: 0;
+            padding-right: 8px;
+        }
+
+        .panel-close {
+            background: #f1f5f9;
+            border: none;
+            color: #64748b;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .panel-close:hover {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+
+        .panel-section {
+            margin-bottom: 12px;
+            font-size: 13px;
+            color: #334155;
+            line-height: 1.5;
+        }
+
+        .panel-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        /* Active Pin Selection Treatment */
+        .selected-pin-active {
+            transform: scale(1.35) !important;
+            filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.85)) !important;
+            z-index: 99999 !important;
+        }
+
+        /* Station Directory Panel Container */
         .map-directory-panel {
             background: rgba(255, 255, 255, 0.95);
             padding: 12px 14px;
@@ -105,7 +188,6 @@
             margin-bottom: 4px;
         }
 
-        /* Simulated Map Pin Core Indicator */
         .dir-core {
             width: 12px;
             height: 12px;
@@ -116,7 +198,6 @@
             border: 1px solid rgba(0,0,0,0.15);
         }
 
-        /* Simulated Map Pin Edge Ring Indicator */
         .dir-ring {
             width: 10px;
             height: 10px;
@@ -129,14 +210,14 @@
             border-style: solid;
         }
 
-        /* ABRP Style Premium Floating Badges */
+        /* Floating Pin Graphics Styles */
         .abrp-badge {
             display: flex;
             align-items: center;
             justify-content: center;
             border-radius: 50%; 
             box-shadow: 0 3px 8px rgba(0,0,0,0.35);
-            transition: transform 0.1s ease;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             box-sizing: border-box;
         }
         
@@ -149,17 +230,35 @@
         .abrp-dot {
             border-radius: 50%;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             box-sizing: border-box;
         }
     </style>
 
+    <!-- Core Leaflet JS Engine -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 </head>
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v3.2</div>
+    <div id="version-tag">v4.0</div>
     <div id="map"></div>
+
+    <!-- Right Side Dashboard Element Container -->
+    <div id="detail-panel">
+        <div class="panel-header">
+            <h3 class="panel-title" id="panel-station-title">Station Details</h3>
+            <button class="panel-close" id="panel-close-btn">&times;</button>
+        </div>
+        <div class="panel-section">
+            <div class="panel-label">⚡ Connection Profile</div>
+            <div id="panel-station-plugs">Scanning profiles...</div>
+        </div>
+        <div class="panel-section">
+            <div class="panel-label">🔢 Charging Capacity</div>
+            <div id="panel-station-capacity">1 Outlet available</div>
+        </div>
+    </div>
 
     <script>
         window.addEventListener('DOMContentLoaded', () => {
@@ -185,16 +284,14 @@
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors | Data via <a href="https://wiki.openstreetmap.org/wiki/Overpass_API" target="_blank">Overpass API</a>'
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors'
             }).addTo(map);
 
-            // CREATE AND INJECT THE DIRECTORY CONTROL
             const directoryControl = L.control({ position: 'bottomright' });
             directoryControl.onAdd = function() {
                 const div = L.DomUtil.create('div', 'map-directory-panel');
                 div.innerHTML = `
                     <h4>Station Directory</h4>
-                    
                     <h5>Network Brands</h5>
                     <div class="directory-row"><span class="dir-core" style="background:#e82127;"></span>Tesla (Exclusive Red)</div>
                     <div class="directory-row"><span class="dir-core" style="background:#ffc700;"></span>Fastned</div>
@@ -203,7 +300,6 @@
                     <div class="directory-row"><span class="dir-core" style="background:#22c55e;"></span>Other Networks</div>
                     <div class="directory-row"><span class="dir-core" style="background:#111111;"></span>Ionity</div>
                     <div class="directory-row"><span class="dir-core" style="background:#94a3b8;"></span>Unnamed / Independent</div>
-
                     <h5>Station Capacity</h5>
                     <div class="directory-row"><span class="dir-ring" style="border-color:#ef4444;"></span>1-2 Outlets</div>
                     <div class="directory-row"><span class="dir-ring" style="border-color:#f97316;"></span>3-4 Outlets</div>
@@ -216,20 +312,37 @@
             directoryControl.addTo(map);
 
             let markerLayer = L.layerGroup().addTo(map);
+            let areaHighlightLayer = L.layerGroup().addTo(map); // Footprint Highlighting Layer
             let userLocationMarker = null;
+            let activeSelectedMarker = null;
+
             const zoomNotice = document.getElementById('zoom-notice');
-            let debounceTimeout;
+            const detailPanel = document.getElementById('detail-panel');
+            const panelCloseBtn = document.getElementById('panel-close-btn');
             
-            let isPopupActive = false;
+            let debounceTimeout;
+            let currentSelectedId = null;
+
+            // UI Actions
+            panelCloseBtn.addEventListener('click', clearActiveSelection);
+
+            function clearActiveSelection() {
+                detailPanel.style.display = 'none';
+                areaHighlightLayer.clearLayers();
+                if (activeSelectedMarker && activeSelectedMarker._icon) {
+                    activeSelectedMarker._icon.classList.remove('selected-pin-active');
+                }
+                activeSelectedMarker = null;
+                currentSelectedId = null;
+            }
 
             async function fetchChargingStations() {
-                if (isPopupActive) return;
                 if (!map.getBounds()) return;
-
                 const currentZoom = map.getZoom();
 
                 if (currentZoom < 12) {
                     markerLayer.clearLayers();
+                    clearActiveSelection();
                     zoomNotice.style.display = 'block';
                     return;
                 } else {
@@ -243,13 +356,13 @@
                 const east = bounds.getEast();
 
                 let overpassBlock = 'node["amenity"="charging_station"]({bounds}); way["amenity"="charging_station"]({bounds});';
-                
                 if (currentZoom === 12 || currentZoom === 13) {
                     overpassBlock = 'node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2);';
                 }
 
                 const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v3.2\n(${finalBlock});out center;`;
+                // UPGRADED TO GEOM OUT TO MAP CHARGING POLYS
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v4.0\n(${finalBlock});out geom;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -258,14 +371,22 @@
                     const response = await fetch(url.toString(), { method: "GET" });
                     const data = await response.json();
                     
-                    if (isPopupActive) return;
-                    
                     markerLayer.clearLayers();
+
+                    // Re-draw selected geometry layer context if panning refreshes viewport data arrays
+                    let retainedMarkerRef = null;
 
                     if (data && data.elements) {
                         data.elements.forEach(element => {
-                            const lat = element.lat || (element.center && element.center.lat);
-                            const lon = element.lon || (element.center && element.center.lon);
+                            let lat, lon;
+                            
+                            if (element.type === 'node') {
+                                lat = element.lat;
+                                lon = element.lon;
+                            } else if (element.type === 'way' && element.bounds) {
+                                lat = (element.bounds.minlat + element.bounds.maxlat) / 2;
+                                lon = (element.bounds.minlng + element.bounds.maxlng) / 2;
+                            }
                             
                             if (lat && lon) {
                                 const tags = element.tags || {};
@@ -275,7 +396,6 @@
                                 const capacity = parseInt(capacityRaw, 10) || 1;
                                 
                                 const badgeW = 26, badgeH = 26;
-
                                 const socketProfiles = [];
                                 let maxDetectedKw = 0;
 
@@ -312,27 +432,17 @@
                                 }
 
                                 const lowerOp = operator.toLowerCase();
-
-                                // Systematic Corporate Color Allocator
-                                let coreColor = "#94a3b8"; // Default Grey
+                                let coreColor = "#94a3b8"; 
                                 
                                 if (rawOperator !== "") {
-                                    coreColor = "#22c55e"; // Default Network Green
-
-                                    if (lowerOp.includes("fastned")) {
-                                        coreColor = "#ffc700"; 
-                                    } else if (lowerOp.includes("shell")) {
-                                        coreColor = "#f7d117"; 
-                                    } else if (lowerOp.includes("allego")) {
-                                        coreColor = "#004b49"; 
-                                    } else if (lowerOp.includes("ionity")) {
-                                        coreColor = "#111111"; 
-                                    } else if (lowerOp.includes("eneco") || lowerOp.includes("totalenergies")) {
-                                        coreColor = "#22c55e"; 
-                                    }
+                                    coreColor = "#22c55e"; 
+                                    if (lowerOp.includes("fastned")) coreColor = "#ffc700"; 
+                                    else if (lowerOp.includes("shell")) coreColor = "#f7d117"; 
+                                    else if (lowerOp.includes("allego")) coreColor = "#004b49"; 
+                                    else if (lowerOp.includes("ionity")) coreColor = "#111111"; 
+                                    else if (lowerOp.includes("eneco") || lowerOp.includes("totalenergies")) coreColor = "#22c55e"; 
                                 }
 
-                                // Outer Ring Capacity Colors
                                 let ringColor = "#ef4444"; 
                                 if (capacity >= 3 && capacity < 5) ringColor = "#f97316"; 
                                 else if (capacity >= 5 && capacity < 10) ringColor = "#22c55e"; 
@@ -340,9 +450,8 @@
                                 else if (capacity >= 20) ringColor = "#a855f7"; 
 
                                 let innerHtmlContent = null;
-
                                 if (lowerOp.includes("tesla")) {
-                                    coreColor = "#e82127"; // Tesla Pure Red
+                                    coreColor = "#e82127"; 
                                     innerHtmlContent = `
                                         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                             <path d="M12,21.3C12,21.3 12.3,10.6 12.3,9.5C12.3,8.4 14.2,7.3 15.3,7L15.3,6.2C13.4,6.4 12,7 12,7C12,7 10.6,6.4 8.7,6.2L8.7,7C9.8,7.3 11.7,8.4 11.7,9.5C11.7,10.6 12,21.3 12,21.3M4.6,5L4.8,4.2C7,3.3 9.4,2.9 12,2.9C14.6,2.9 17,3.3 19.2,4.2L19.4,5C17.1,4.2 14.6,3.8 12,3.8C9.4,3.8 6.9,4.2 4.6,5Z"/>
@@ -351,58 +460,90 @@
                                 } 
 
                                 let customMarkerIcon;
-
                                 if (innerHtmlContent) {
                                     customMarkerIcon = L.divIcon({
                                         html: `<div class="abrp-badge" style="width:${badgeW}px; height:${badgeH}px; background-color:${coreColor}; border: 3px solid ${ringColor};">${innerHtmlContent}</div>`,
-                                        className: '',
-                                        iconSize: [badgeW, badgeH],
-                                        iconAnchor: [badgeW/2, badgeH/2]
+                                        className: '', iconSize: [badgeW, badgeH], iconAnchor: [badgeW/2, badgeH/2]
                                     });
                                 } else {
                                     customMarkerIcon = L.divIcon({
                                         html: `<div class="abrp-dot" style="width:${badgeW}px; height:${badgeH}px; background-color:${coreColor}; border: 4px solid ${ringColor};"></div>`,
-                                        className: '',
-                                        iconSize: [badgeW, badgeH],
-                                        iconAnchor: [badgeW/2, badgeH/2]
+                                        className: '', iconSize: [badgeW, badgeH], iconAnchor: [badgeW/2, badgeH/2]
                                     });
                                 }
 
-                                let socketsHtml = "Not specified";
-                                if (socketProfiles.length > 0) {
-                                    socketsHtml = "<div style='margin-top: 4px; padding-left: 2px;'>" + socketProfiles.join("<br>") + "</div>";
-                                } else if (fallbackKw) {
-                                    const fallbackNum = parseFloat(fallbackKw);
-                                    socketsHtml = isNaN(fallbackNum) ? fallbackKw : `${fallbackNum} kW`;
-                                }
+                                const marker = L.marker([lat, lon], { icon: customMarkerIcon });
+                                
+                                // NEW PANEL INTERACTION HOOK INSTEAD OF POPUP BOUNDS
+                                marker.on('click', (e) => {
+                                    L.DomEvent.stopPropagation(e);
+                                    
+                                    // Reset structural classes
+                                    if (activeSelectedMarker && activeSelectedMarker._icon) {
+                                        activeSelectedMarker._icon.classList.remove('selected-pin-active');
+                                    }
+                                    
+                                    activeSelectedMarker = marker;
+                                    currentSelectedId = element.id;
+                                    
+                                    if (marker._icon) {
+                                        marker._icon.classList.add('selected-pin-active');
+                                    }
 
-                                const popupContent = `
-                                    <div style="font-size: 14px; line-height: 1.4; font-family: sans-serif; min-width: 175px;">
-                                        <strong>🏢 ${operator}</strong><br>
-                                        ⚡ Power Output:<br>${socketsHtml}<br>
-                                        🔢 Total Outlets: ${capacityRaw}
-                                    </div>
-                                `;
+                                    // Build Dashboard Data Text Structures
+                                    document.getElementById('panel-station-title').innerText = operator;
+                                    
+                                    let socketsHtml = "Not specified";
+                                    if (socketProfiles.length > 0) {
+                                        socketsHtml = "<div style='margin-top: 4px;'>" + socketProfiles.join("<br>") + "</div>";
+                                    } else if (fallbackKw) {
+                                        const fallbackNum = parseFloat(fallbackKw);
+                                        socketsHtml = isNaN(fallbackNum) ? fallbackKw : `⚡ Standard Hub: <strong>${fallbackNum} kW</strong>`;
+                                    }
+                                    document.getElementById('panel-station-plugs').innerHTML = socketsHtml;
+                                    document.getElementById('panel-station-capacity').innerText = `${capacityRaw} Outlets available`;
 
-                                const marker = L.marker([lat, lon], { icon: customMarkerIcon }).bindPopup(popupContent);
+                                    detailPanel.style.display = 'block';
+
+                                    // AREA HIGHLIGHT ENGINE FOR FOOTPRINTS IN OSM
+                                    areaHighlightLayer.clearLayers();
+                                    if (element.type === 'way' && element.geometry) {
+                                        const latLngs = element.geometry.map(pt => [pt.lat, pt.lon]);
+                                        L.polygon(latLngs, {
+                                            color: '#3b82f6',
+                                            weight: 3,
+                                            fillColor: '#60a5fa',
+                                            fillOpacity: 0.4,
+                                            dashArray: '4, 4'
+                                        }).addTo(areaHighlightLayer);
+                                    }
+                                    
+                                    map.panTo([lat, lon]);
+                                });
+
                                 markerLayer.addLayer(marker);
+
+                                if (currentSelectedId && element.id === currentSelectedId) {
+                                    retainedMarkerRef = marker;
+                                }
                             }
                         });
                     }
+
+                    // Reinstate state modifiers across debounce paint steps
+                    if (retainedMarkerRef) {
+                        activeSelectedMarker = retainedMarkerRef;
+                        if (activeSelectedMarker._icon) {
+                            activeSelectedMarker._icon.classList.add('selected-pin-active');
+                        }
+                    }
+
                 } catch (error) {
                     console.error("Fetch exception details:", error);
                 }
             }
 
-            map.on('popupopen', () => { isPopupActive = true; });
-            map.on('popupclose', () => { 
-                isPopupActive = false; 
-                onMapChange();
-            });
-
             function onMapChange() {
-                if (isPopupActive) return; 
-                
                 const center = map.getCenter();
                 localStorage.setItem('map_lat', center.lat);
                 localStorage.setItem('map_lng', center.lng);
@@ -411,30 +552,35 @@
                 clearTimeout(debounceTimeout);
                 debounceTimeout = setTimeout(fetchChargingStations, 300);
             }
+            
             map.on('moveend', onMapChange);
+            map.on('click', clearActiveSelection);
             
             map.on('locationfound', (e) => {
-                if (userLocationMarker) {
-                    map.removeLayer(userLocationMarker);
-                }
+                if (userLocationMarker) map.removeLayer(userLocationMarker);
                 userLocationMarker = L.circle(e.latlng, { radius: e.accuracy / 2, color: '#0078ff', weight: 2, fillOpacity: 0.15 }).addTo(map);
             });
 
-            map.on('locationerror', () => {
-                alert("Location access denied or unavailable.");
-            });
+            map.whenReady(fetchChargingStations);
 
-            map.whenReady(() => {
-                fetchChargingStations();
-            });
-
+            // CUSTOM RENDER FOR LOCATION CONTROL (Matches image_ea8c1c.png perfectly)
             const zoomControlContainer = document.querySelector('.leaflet-control-zoom');
             if (zoomControlContainer) {
                 const locateBtn = L.DomUtil.create('a', 'leaflet-control-locate', zoomControlContainer);
-                locateBtn.innerHTML = "⌖";
                 locateBtn.href = "#";
                 locateBtn.title = "Find My Location";
                 locateBtn.role = "button";
+                
+                // Pure Inline SVG Crosshair matching native font thickness properties
+                locateBtn.innerHTML = `
+                    <svg width="15" height="15" viewBox="0 0 16 16">
+                        <circle cx="8" cy="8" r="3.5"></circle>
+                        <line x1="8" y1="0" x2="8" y2="4"></line>
+                        <line x1="8" y1="12" x2="8" y2="16"></line>
+                        <line x1="0" y1="8" x2="4" y2="8"></line>
+                        <line x1="12" y1="8" x2="16" y2="8"></line>
+                    </svg>
+                `;
                 
                 locateBtn.onclick = function(e) {
                     e.preventDefault();
