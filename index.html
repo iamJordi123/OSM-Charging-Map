@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>OSM EV Charging Map</title>
     
-    <!-- Core Leaflet CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
     
     <style>
@@ -89,7 +88,7 @@
             border: 1px solid #e2e8f0;
             padding: 16px;
             display: none;
-            transition: all 0.25s ease;
+            transition: all 0.2s ease;
         }
 
         .panel-header {
@@ -145,9 +144,9 @@
             margin-bottom: 2px;
         }
 
-        /* Active Pin Selection Treatment */
+        /* Active Pin Selection Treatment with explicit scale reset fallback protection */
         .selected-pin-active {
-            transform: scale(1.35) !important;
+            transform: scale(1.35) translate3d(0,0,0) !important;
             filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.85)) !important;
             z-index: 99999 !important;
         }
@@ -217,7 +216,6 @@
             justify-content: center;
             border-radius: 50%; 
             box-shadow: 0 3px 8px rgba(0,0,0,0.35);
-            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             box-sizing: border-box;
         }
         
@@ -230,21 +228,18 @@
         .abrp-dot {
             border-radius: 50%;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             box-sizing: border-box;
         }
     </style>
 
-    <!-- Core Leaflet JS Engine -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 </head>
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v4.1</div>
+    <div id="version-tag">v4.2</div>
     <div id="map"></div>
 
-    <!-- Right Side Dashboard Element Container -->
     <div id="detail-panel">
         <div class="panel-header">
             <h3 class="panel-title" id="panel-station-title">Station Details</h3>
@@ -322,13 +317,15 @@
             let debounceTimeout;
             let currentSelectedId = null;
 
-            panelCloseBtn.addEventListener('click', clearActiveSelection);
+            panelCloseBtn.addEventListener('click', (e) => {
+                L.DomEvent.stopPropagation(e);
+                clearActiveSelection();
+            });
 
             function clearActiveSelection() {
                 detailPanel.style.display = 'none';
                 areaHighlightLayer.clearLayers();
                 currentSelectedId = null;
-                // Remove highlight classes from any visible marker
                 markerLayer.eachLayer(marker => {
                     if (marker._icon) marker._icon.classList.remove('selected-pin-active');
                 });
@@ -353,13 +350,14 @@
                 const north = bounds.getNorth();
                 const east = bounds.getEast();
 
-                let overpassBlock = 'node["amenity"="charging_station"]({bounds}); way["amenity"="charging_station"]({bounds});';
+                // Robust node and way matching fallback rules
+                let overpassBlock = 'node["amenity"="charging_station"]({bounds}); way["amenity"="charging_station"]({bounds}); node["brand"~"Tesla",i]({bounds});';
                 if (currentZoom === 12 || currentZoom === 13) {
-                    overpassBlock = 'node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2);';
+                    overpassBlock = 'node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); node["brand"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2);';
                 }
 
                 const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v4.1\n(${finalBlock});out geom;`;
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v4.2\n(${finalBlock});out geom;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -384,7 +382,6 @@
                             
                             if (lat && lon) {
                                 const tags = element.tags || {};
-                                // FIX: Check both brand and operator properties comprehensively
                                 const operator = tags.operator || tags.brand || "";
                                 const capacityRaw = tags.capacity || "1"; 
                                 const capacity = parseInt(capacityRaw, 10) || 1;
@@ -470,9 +467,9 @@
                                 const marker = L.marker([lat, lon], { icon: customMarkerIcon });
                                 
                                 marker.on('click', (e) => {
+                                    // CRITICAL: Stop propagation completely so it doesn't fire map.on('click')
                                     L.DomEvent.stopPropagation(e);
                                     
-                                    // Strip selection class from all layers first
                                     markerLayer.eachLayer(m => {
                                         if (m._icon) m._icon.classList.remove('selected-pin-active');
                                     });
@@ -513,11 +510,11 @@
 
                                 markerLayer.addLayer(marker);
 
-                                // FIX: Apply selection logic safely during paint loops if this marker matches the selected ID
+                                // Restore selection class if view repaints during active focus
                                 if (currentSelectedId && element.id === currentSelectedId) {
                                     setTimeout(() => {
                                         if (marker._icon) marker._icon.classList.add('selected-pin-active');
-                                    }, 10);
+                                    }, 20);
                                 }
                             }
                         });
@@ -538,7 +535,11 @@
             }
             
             map.on('moveend', onMapChange);
-            map.on('click', clearActiveSelection);
+            
+            // Map background tap clears sidebar safely
+            map.on('click', () => {
+                clearActiveSelection();
+            });
             
             map.on('locationfound', (e) => {
                 if (userLocationMarker) map.removeLayer(userLocationMarker);
