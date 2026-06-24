@@ -27,7 +27,6 @@
             z-index: 1;
         }
 
-        /* Fixed Custom Location Button to match native leaflet bar sizing exactly */
         .leaflet-bar a.leaflet-control-locate {
             display: flex;
             align-items: center;
@@ -144,7 +143,6 @@
             margin-bottom: 2px;
         }
 
-        /* FIXED: Selection rule scales the INNER marker components without destroying Leaflet's spatial positioning engine */
         .selected-pin-active {
             z-index: 99999 !important;
         }
@@ -243,7 +241,7 @@
 <body>
 
     <div id="zoom-notice">🔍 Zoom in to load charging stations</div>
-    <div id="version-tag">v4.3</div>
+    <div id="version-tag">v4.4</div>
     <div id="map"></div>
 
     <div id="detail-panel">
@@ -322,6 +320,7 @@
             
             let debounceTimeout;
             let currentSelectedId = null;
+            let ignoreNextRepaint = false; // FIXED: Semaphor flag to prevent selection jumping layout updates
 
             panelCloseBtn.addEventListener('click', (e) => {
                 L.DomEvent.stopPropagation(e);
@@ -332,12 +331,19 @@
                 detailPanel.style.display = 'none';
                 areaHighlightLayer.clearLayers();
                 currentSelectedId = null;
+                ignoreNextRepaint = false;
                 markerLayer.eachLayer(marker => {
                     if (marker._icon) marker._icon.classList.remove('selected-pin-active');
                 });
             }
 
             async function fetchChargingStations() {
+                // FIXED: If user clicked an element and layout is auto-adjusting, block clearing memory map layer
+                if (ignoreNextRepaint) {
+                    ignoreNextRepaint = false;
+                    return;
+                }
+
                 if (!map.getBounds()) return;
                 const currentZoom = map.getZoom();
 
@@ -356,14 +362,28 @@
                 const north = bounds.getNorth();
                 const east = bounds.getEast();
 
-                // FIXED: Query now explicitly gathers both Tesla structural area shapes (ways) and point components
-                let overpassBlock = 'node["amenity"="charging_station"]({bounds}); way["amenity"="charging_station"]({bounds}); node["brand"~"Tesla",i]({bounds}); way["brand"~"Tesla",i]({bounds});';
+                // FIXED: Comprehensive wildcard regex checking amenities, operators, brands AND names globally 
+                let overpassBlock = `
+                    node["amenity"="charging_station"]({bounds}); 
+                    way["amenity"="charging_station"]({bounds}); 
+                    node["brand"~"Tesla",i]({bounds}); 
+                    way["brand"~"Tesla",i]({bounds});
+                    node["name"~"Tesla",i]({bounds});
+                    way["name"~"Tesla",i]({bounds});
+                `;
                 if (currentZoom === 12 || currentZoom === 13) {
-                    overpassBlock = 'node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); node["brand"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2); way["brand"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2);';
+                    overpassBlock = `
+                        node["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); 
+                        way["amenity"="charging_station"]({bounds})(if:number(t["capacity"]) > 2); 
+                        node["brand"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2); 
+                        way["brand"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2);
+                        node["name"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2);
+                        way["name"~"Tesla",i]({bounds})(if:number(t["capacity"]) > 2);
+                    `;
                 }
 
                 const finalBlock = overpassBlock.replaceAll('{bounds}', `${south},${west},${north},${east}`);
-                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v4.3\n(${finalBlock});out geom;`;
+                const query = `[out:json][timeout:25]; //App: OSM_EV_Charging_Map_v4.4\n(${finalBlock});out geom;`;
                 
                 const url = new URL('https://overpass.openstreetmap.fr/api/interpreter');
                 url.searchParams.append('data', query);
@@ -375,6 +395,9 @@
                     markerLayer.clearLayers();
 
                     if (data && data.elements) {
+                        // Track duplicates using map unique hashes
+                        const seenCoordinates = new Set();
+
                         data.elements.forEach(element => {
                             let lat, lon;
                             
@@ -387,8 +410,11 @@
                             }
                             
                             if (lat && lon) {
+                                const coordKey = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+                                if (seenCoordinates.has(coordKey)) return; 
+                                seenCoordinates.add(coordKey);
+
                                 const tags = element.tags || {};
-                                // FIXED: Broadened brand fallback sequence to include names for mis-tagged Tesla hardware hubs
                                 const operator = tags.operator || tags.brand || tags.name || "";
                                 const capacityRaw = tags.capacity || "1"; 
                                 const capacity = parseInt(capacityRaw, 10) || 1;
@@ -511,12 +537,13 @@
                                         }).addTo(areaHighlightLayer);
                                     }
                                     
+                                    // FIXED: Set ignore flag before centering camera to avoid jump/pop flash
+                                    ignoreNextRepaint = true;
                                     map.panTo([lat, lon]);
                                 });
 
                                 markerLayer.addLayer(marker);
 
-                                // Safely re-attach state visual modifiers if data repaints while selected
                                 if (currentSelectedId && element.id === currentSelectedId) {
                                     setTimeout(() => {
                                         if (marker._icon) marker._icon.classList.add('selected-pin-active');
